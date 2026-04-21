@@ -4,12 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Stock Price Predictor</title>
+    <script>
+      (function () {
+        try {
+          const theme = localStorage.getItem("theme") || "light";
+          if (theme === "dark") document.documentElement.classList.add("dark-theme");
+        } catch (_) {}
+      })();
+    </script>
     <link rel="stylesheet" href="/static/styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
   </head>
   <body>
+    <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark and light mode">🌙</button>
     <main class="page">
       <section class="hero card">
         <p class="eyebrow">Stock Forecast Assistant</p>
@@ -135,10 +144,17 @@
             </div>
           </div>
 
-          <p id="disclaimer" class="disclaimer"></p>
         </section>
       </section>
     </main>
+    <div class="legal-disclaimer">
+      ⚠️ IMPORTANT DISCLAIMER: This tool is for informational and educational purposes only. It does not constitute
+      financial advice, investment advice, trading advice, or any other sort of advice. All predictions are generated
+      by machine learning models and carry inherent uncertainty and risk. Past performance does not guarantee future
+      results. Never invest money you cannot afford to lose. Always conduct your own research and consult a licensed
+      financial advisor before making any investment decisions. The creators of this tool are not responsible for any
+      financial losses incurred from using this tool.
+    </div>
     <script src="/static/app.js"></script>
   </body>
 </html>

@@ -11,7 +11,7 @@ const confidenceBar = document.getElementById("confidence-bar");
 const confidenceValue = document.getElementById("confidence-value");
 const actionLine = document.getElementById("action-line");
 const aiExplanation = document.getElementById("ai-explanation");
-const disclaimer = document.getElementById("disclaimer");
+const themeToggle = document.getElementById("theme-toggle");
 const technicalGrid = document.getElementById("technical-grid");
 const backtestCards = document.getElementById("backtest-cards");
 const riskCards = document.getElementById("risk-cards");
@@ -39,6 +39,7 @@ let candleChart;
 let volumeChart;
 const WATCHLIST_KEY = "watchlist";
 const HISTORY_KEY = "predictionHistory";
+const THEME_KEY = "theme";
 
 function signalTone(signal) {
   const value = String(signal || "NEUTRAL").toUpperCase();
@@ -46,6 +47,20 @@ function signalTone(signal) {
   if (value === "BEARISH") return "negative";
   return "neutral";
 }
+
+function applyTheme(theme) {
+  const isDark = theme === "dark";
+  document.documentElement.classList.toggle("dark-theme", isDark);
+  document.body.classList.toggle("dark-theme", isDark);
+  themeToggle.textContent = isDark ? "☀️" : "🌙";
+  localStorage.setItem(THEME_KEY, isDark ? "dark" : "light");
+  if (lastPrediction) renderAdvancedCharts(lastPrediction.chart_data);
+}
+
+themeToggle.addEventListener("click", () => {
+  const nextTheme = document.documentElement.classList.contains("dark-theme") ? "light" : "dark";
+  applyTheme(nextTheme);
+});
 
 function getWatchlist() {
   try {
@@ -240,6 +255,9 @@ function destroyChart(chartRef) {
 }
 
 function renderAdvancedCharts(chartData) {
+  const styles = getComputedStyle(document.documentElement);
+  const gridColor = styles.getPropertyValue("--grid-line").trim() || "rgba(100, 116, 139, 0.2)";
+  const tickColor = styles.getPropertyValue("--tick-color").trim() || "#64748b";
   const candleCtx = document.getElementById("candle-chart").getContext("2d");
   const volumeCtx = document.getElementById("volume-chart").getContext("2d");
   destroyChart(candleChart);
@@ -280,7 +298,10 @@ function renderAdvancedCharts(chartData) {
     options: {
       parsing: false,
       plugins: { legend: { position: "bottom" } },
-      scales: { x: { type: "time", time: { unit: "day" } } },
+      scales: {
+        x: { type: "time", time: { unit: "day" }, ticks: { color: tickColor }, grid: { color: gridColor } },
+        y: { ticks: { color: tickColor }, grid: { color: gridColor } },
+      },
     },
   });
 
@@ -292,15 +313,26 @@ function renderAdvancedCharts(chartData) {
     },
     options: {
       plugins: { legend: { display: false } },
-      scales: { x: { type: "time", display: false } },
+      scales: {
+        x: { type: "time", display: false, ticks: { color: tickColor }, grid: { color: gridColor } },
+        y: { ticks: { color: tickColor }, grid: { color: gridColor } },
+      },
     },
   });
 }
 
 function renderCards(target, cards) {
+  const accentClassByLabel = {
+    "Win Rate": "metric-accent-win",
+    "Sharpe Ratio": "metric-accent-sharpe",
+    "Max Drawdown": "metric-accent-drawdown",
+    Beta: "metric-accent-beta",
+    "30d Volatility": "metric-accent-volatility",
+    "VaR (95%)": "metric-accent-var",
+  };
   target.innerHTML = cards
     .map(
-      (card) => `<div class="metric-card">
+      (card) => `<div class="metric-card ${accentClassByLabel[card.label] || ""}">
         <div class="label">${card.label}</div>
         <div class="value">${card.value}</div>
       </div>`
@@ -315,11 +347,10 @@ function renderPrediction(prediction) {
   signalBadge.textContent = signal;
   signalBadge.className = `signal-badge ${tone}`;
   confidenceBar.style.width = `${prediction.confidence}%`;
+  confidenceBar.className = `progress-bar ${tone}`;
   confidenceValue.textContent = `${prediction.confidence.toFixed(1)}%`;
   actionLine.textContent = prediction.action;
   aiExplanation.textContent = prediction.explanation;
-  disclaimer.textContent =
-    "Educational use only. This dashboard is not financial advice and should be used with independent research.";
 
   const technicals = prediction.indicators;
   let rsiTone = "gray";
@@ -354,7 +385,10 @@ function renderPrediction(prediction) {
 
   const t = prediction.multi_timeframe || [];
   timeframeTable.innerHTML = t
-    .map((data) => `<tr><td>${data.horizon}</td><td>${data.signal}</td><td>${data.confidence}%</td></tr>`)
+    .map((data) => {
+      const signalClass = signalTone(data.signal);
+      return `<tr><td>${data.horizon}</td><td class="signal-cell ${signalClass}">${data.signal}</td><td>${data.confidence}%</td></tr>`;
+    })
     .join("");
   placeholders.timeframe.classList.add("hidden");
 
@@ -378,7 +412,7 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   statusBadge.textContent = "Processing";
   const originalButtonText = submitButton.textContent;
-  submitButton.textContent = "Analyzing...";
+  submitButton.textContent = "⏳ Analyzing...";
   submitButton.disabled = true;
   emptyState.textContent = "Training models and generating prediction...";
   emptyState.classList.remove("hidden");
@@ -416,4 +450,5 @@ form.addEventListener("submit", async (event) => {
 
 renderWatchlist();
 renderHistory();
+applyTheme(localStorage.getItem(THEME_KEY) || "light");
 setMode("casual");
