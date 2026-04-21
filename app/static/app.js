@@ -13,7 +13,6 @@ const actionLine = document.getElementById("action-line");
 const aiExplanation = document.getElementById("ai-explanation");
 const disclaimer = document.getElementById("disclaimer");
 const technicalGrid = document.getElementById("technical-grid");
-const sentimentFeed = document.getElementById("sentiment-feed");
 const backtestCards = document.getElementById("backtest-cards");
 const riskCards = document.getElementById("risk-cards");
 const timeframeTable = document.getElementById("timeframe-table");
@@ -22,7 +21,6 @@ const placeholders = {
   candle: document.getElementById("ph-candle"),
   volume: document.getElementById("ph-volume"),
   technical: document.getElementById("ph-technical"),
-  news: document.getElementById("ph-news"),
   backtest: document.getElementById("ph-backtest"),
   risk: document.getElementById("ph-risk"),
   timeframe: document.getElementById("ph-timeframe"),
@@ -62,12 +60,6 @@ function setMode(mode) {
 
 modeCasualBtn.addEventListener("click", () => setMode("casual"));
 modeAdvancedBtn.addEventListener("click", () => setMode("advanced"));
-
-function sentimentTagClass(sentiment) {
-  if (sentiment === "positive") return "tag-positive";
-  if (sentiment === "negative") return "tag-negative";
-  return "tag-neutral";
-}
 
 function destroyChart(chartRef) {
   if (chartRef) chartRef.destroy();
@@ -171,9 +163,6 @@ function renderPrediction(prediction) {
     <div class="kv"><div class="k">ATR</div><div class="v">${technicals.atr}</div></div>
   `;
   placeholders.technical.classList.add("hidden");
-
-  sentimentFeed.innerHTML = '<div class="muted">Sentiment data coming in Phase 3</div>';
-  placeholders.news.classList.add("hidden");
 
   renderCards(backtestCards, [
     { label: "Win Rate", value: `${prediction.backtest.win_rate}%` },

@@ -290,10 +290,7 @@ button:hover {
 }
 
 .news-item {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 0;
+  padding: 10px 0;
   border-bottom: 1px solid #eceff3;
 }
 
@@ -301,8 +298,38 @@ button:hover {
   border-bottom: none;
 }
 
-.news-title {
+.news-content {
+  display: grid;
+  gap: 6px;
+}
+
+.news-title-link {
   font-size: 0.9rem;
+  color: #111827;
+  text-decoration: none;
+}
+
+.news-title-link:hover {
+  text-decoration: underline;
+}
+
+.news-meta {
+  font-size: 0.78rem;
+  color: #6b7280;
+}
+
+.news-overall {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eceff3;
+}
+
+.news-overall-text {
+  font-size: 0.88rem;
+  font-weight: 600;
 }
 
 .sentiment-tag {

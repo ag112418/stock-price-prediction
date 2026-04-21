@@ -187,7 +187,7 @@ def compute_risk_metrics(df: pd.DataFrame) -> tuple[float, float, float]:
     return beta, volatility, var_95
 
 
-def get_llm_explanation(ticker, signal, confidence, features, mode):
+def get_llm_explanation(ticker, signal, confidence, features, mode, sentiment_label="NEUTRAL", sentiment_score=0.0):
     try:
         client = Together(api_key=os.getenv("TOGETHER_API_KEY"))
 
@@ -204,6 +204,7 @@ def get_llm_explanation(ticker, signal, confidence, features, mode):
             a stock prediction to a beginner investor.
             Stock: {ticker}
             Signal: {signal} with {confidence:.0f}% confidence
+            Recent news sentiment: {sentiment_label} (score: {sentiment_score:.2f})
             RSI is {rsi:.1f} ({rsi_interp}), MACD shows {macd_interp}, 
             price is {ema_interp} its 50-day average.
             Write 2-3 sentences in plain English explaining why the model 
@@ -214,6 +215,7 @@ def get_llm_explanation(ticker, signal, confidence, features, mode):
             signal to an experienced trader.
             Stock: {ticker}
             Signal: {signal} with {confidence:.0f}% confidence
+            Recent news sentiment: {sentiment_label} (score: {sentiment_score:.2f})
             RSI: {rsi:.1f} ({rsi_interp})
             MACD histogram: {macd_diff:.3f} ({macd_interp})
             Price vs EMA50: {ema_interp}
