@@ -21,7 +21,7 @@ Browser-based client/server project that predicts whether a stock is likely to m
 - **Client:** HTML + CSS + JavaScript
 - **ML:** scikit-learn, XGBoost
 - **Data:** yfinance + pandas + numpy
-- **LLM (optional):** OpenAI Chat Completions (`gpt-4o-mini`)
+- **LLM (optional):** Together.ai Chat Completions
 
 ## Run Locally
 
@@ -38,7 +38,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-4. (Optional) Add `OPENAI_API_KEY` in `.env` for AI explanations.
+4. (Optional) Add `TOGETHER_API_KEY` in `.env` for AI explanations.
 5. Start the server:
 
 ```bash

@@ -71,7 +71,7 @@ Prompt records are archived in `prompt_archive/prompts.md` and included as part 
 
 1. Install dependencies:
    - `pip install -r requirements.txt`
-2. Create `.env` from `.env.example` and optionally set `OPENAI_API_KEY`.
+2. Create `.env` from `.env.example` and optionally set `TOGETHER_API_KEY`.
 3. Run server:
    - `uvicorn app.main:app --reload`
 4. Open browser client:

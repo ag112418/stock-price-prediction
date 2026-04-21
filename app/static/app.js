@@ -83,32 +83,54 @@ function renderAdvancedCharts(chartData) {
   destroyChart(macdChart);
 
   const candles = chartData.dates.map((d, i) => ({
-    x: d,
+    x: new Date(`${d}T00:00:00Z`).getTime(),
     o: chartData.open[i],
     h: chartData.high[i],
     l: chartData.low[i],
     c: chartData.close[i],
   }));
-  const ema20 = chartData.dates.map((d, i) => ({ x: d, y: chartData.ema20[i] }));
-  const ema50 = chartData.dates.map((d, i) => ({ x: d, y: chartData.ema50[i] }));
-  const volume = chartData.dates.map((d, i) => ({ x: d, y: chartData.volume[i] }));
+  const ema20 = chartData.dates.map((d, i) => ({
+    x: new Date(`${d}T00:00:00Z`).getTime(),
+    y: chartData.ema20[i],
+  }));
+  const ema50 = chartData.dates.map((d, i) => ({
+    x: new Date(`${d}T00:00:00Z`).getTime(),
+    y: chartData.ema50[i],
+  }));
+  const volumeLabels = chartData.dates.map((d) => new Date(`${d}T00:00:00Z`).getTime());
+  const volumeValues = chartData.volume.map((v) => Number(v));
 
   candleChart = new Chart(candleCtx, {
     type: "candlestick",
     data: {
       datasets: [
-        { label: "OHLC", data: candles },
+        {
+          label: "OHLC",
+          data: candles,
+          borderColor: { up: "#16a34a", down: "#dc2626", unchanged: "#64748b" },
+          color: { up: "#16a34a", down: "#dc2626", unchanged: "#64748b" },
+        },
         { label: "EMA 20", type: "line", data: ema20, borderColor: "#2563eb", pointRadius: 0, tension: 0.2 },
         { label: "EMA 50", type: "line", data: ema50, borderColor: "#f59e0b", pointRadius: 0, tension: 0.2 },
       ],
     },
-    options: { parsing: false, plugins: { legend: { position: "bottom" } }, scales: { x: { type: "time", time: { unit: "day" } } } },
+    options: {
+      parsing: false,
+      plugins: { legend: { position: "bottom" } },
+      scales: { x: { type: "time", time: { unit: "day" } } },
+    },
   });
 
   volumeChart = new Chart(volumeCtx, {
     type: "bar",
-    data: { datasets: [{ label: "Volume", data: volume, backgroundColor: "#94a3b8" }] },
-    options: { parsing: false, plugins: { legend: { display: false } }, scales: { x: { type: "time", display: false } } },
+    data: {
+      labels: volumeLabels,
+      datasets: [{ label: "Volume", data: volumeValues, backgroundColor: "#94a3b8", borderWidth: 0 }],
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: { x: { type: "time", display: false } },
+    },
   });
 
   if (macdCtx) {
