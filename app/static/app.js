@@ -10,6 +10,7 @@ const signalBadge = document.getElementById("signal-badge");
 const confidenceBar = document.getElementById("confidence-bar");
 const confidenceValue = document.getElementById("confidence-value");
 const actionLine = document.getElementById("action-line");
+const tradeSignalBtn = document.getElementById("trade-signal-btn");
 const aiExplanation = document.getElementById("ai-explanation");
 const themeToggle = document.getElementById("theme-toggle");
 const technicalGrid = document.getElementById("technical-grid");
@@ -23,6 +24,9 @@ const watchlistList = document.getElementById("watchlist-list");
 const historyTableBody = document.getElementById("history-table-body");
 const historyTableWrap = document.getElementById("history-table-wrap");
 const clearHistoryBtn = document.getElementById("clear-history-btn");
+const topMoversList = document.getElementById("top-movers-list");
+const moversLastUpdated = document.getElementById("movers-last-updated");
+const refreshMoversBtn = document.getElementById("refresh-movers-btn");
 const placeholders = {
   candle: document.getElementById("ph-candle"),
   volume: document.getElementById("ph-volume"),
@@ -40,6 +44,8 @@ let volumeChart;
 const WATCHLIST_KEY = "watchlist";
 const HISTORY_KEY = "predictionHistory";
 const THEME_KEY = "theme";
+const TOP_MOVERS_TIMEOUT_MS = 20000;
+let hasLoadedTopMovers = false;
 
 function signalTone(signal) {
   const value = String(signal || "NEUTRAL").toUpperCase();
@@ -113,11 +119,11 @@ function renderWatchlist() {
       const tone = signalTone(signal);
       const confidence = Number(item.confidence || 0);
       const updated = formatTimestamp(item.lastUpdated);
-      return `<div class="watchlist-row" data-ticker="${ticker}">
-        <button type="button" class="watchlist-ticker-btn" data-ticker="${ticker}">${ticker}</button>
-        <span class="mini-signal-badge ${tone}">${signal}</span>
-        <span class="watchlist-meta">${confidence.toFixed(1)}% · ${updated}</span>
-        <button type="button" class="watchlist-remove-btn" data-ticker="${ticker}" aria-label="Remove ${ticker}">×</button>
+      return `<div class="watchlist-row watchlist-item" data-ticker="${ticker}">
+        <button type="button" class="watchlist-ticker-btn ticker-name" data-ticker="${ticker}">${ticker}</button>
+        <span class="mini-signal-badge signal-badge-sm ${tone}">${signal}</span>
+        <span class="watchlist-meta meta">${confidence.toFixed(1)}% · ${updated}</span>
+        <button type="button" class="watchlist-remove-btn remove-btn" data-ticker="${ticker}" aria-label="Remove ${ticker}">×</button>
       </div>`;
     })
     .join("");
@@ -136,7 +142,7 @@ function renderHistory() {
       const tone = signalTone(signal);
       return `<tr>
         <td>${row.ticker || ""}</td>
-        <td><span class="mini-signal-badge ${tone}">${signal}</span></td>
+        <td><span class="mini-signal-badge signal-badge-sm ${tone}">${signal}</span></td>
         <td>${Number(row.confidence || 0).toFixed(1)}%</td>
         <td>${formatTimestamp(row.timestamp)}</td>
       </tr>`;
@@ -187,6 +193,111 @@ function addHistoryFromPrediction(prediction) {
   renderHistory();
 }
 
+function formatCompactNumber(value) {
+  const numeric = Number(value || 0);
+  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(numeric);
+}
+
+function formatMoverUpdatedTime(unixSeconds) {
+  if (!unixSeconds) return "--";
+  const dt = new Date(Number(unixSeconds) * 1000);
+  if (Number.isNaN(dt.getTime())) return "--";
+  return dt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+}
+
+function renderMoverSkeletons() {
+  if (!topMoversList) return;
+  topMoversList.innerHTML = Array.from({ length: 5 })
+    .map(
+      () => `<article class="mover-card skeleton-card">
+        <div class="skeleton skeleton-line w-35"></div>
+        <div class="skeleton skeleton-line w-80"></div>
+        <div class="skeleton skeleton-line w-45"></div>
+      </article>`
+    )
+    .join("");
+}
+
+function renderMoversError() {
+  if (!topMoversList) return;
+  topMoversList.innerHTML = `<article class="mover-card mover-error full-width">
+    <p>Market data unavailable. Try refreshing.</p>
+    <button type="button" class="retry-movers-btn" id="retry-movers-btn">Retry</button>
+  </article>`;
+  const retry = document.getElementById("retry-movers-btn");
+  if (retry) retry.addEventListener("click", () => fetchTopMovers({ manual: true }));
+}
+
+function renderTopMovers(items) {
+  if (!topMoversList) return;
+  if (!Array.isArray(items) || !items.length) {
+    renderMoversError();
+    return;
+  }
+  topMoversList.innerHTML = items
+    .slice(0, 5)
+    .map((item) => {
+      const changePct = Number(item.change_pct || 0);
+      const change = Number(item.change || 0);
+      const tone = changePct >= 0 ? "positive" : "negative";
+      const sign = changePct >= 0 ? "+" : "";
+      const safeCompany = item.company || item.ticker || "Unknown";
+      return `<article class="mover-card">
+        <div class="mover-top">
+          <strong>${item.ticker || "-"}</strong>
+          <span class="mover-change ${tone}">${sign}${changePct.toFixed(2)}%</span>
+        </div>
+        <div class="mover-company">${safeCompany}</div>
+        <div class="mover-meta">
+          <span>$${Number(item.price || 0).toFixed(2)}</span>
+          <span>${change >= 0 ? "+" : ""}${change.toFixed(2)}</span>
+          <span>Vol ${formatCompactNumber(item.volume)}</span>
+        </div>
+      </article>`;
+    })
+    .join("");
+}
+
+async function fetchTopMovers({ manual = false } = {}) {
+  if (!topMoversList || !moversLastUpdated) return;
+  renderMoverSkeletons();
+  moversLastUpdated.textContent = "Last updated: Loading market data...";
+  if (refreshMoversBtn) {
+    refreshMoversBtn.disabled = true;
+    refreshMoversBtn.textContent = "Loading...";
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TOP_MOVERS_TIMEOUT_MS);
+  try {
+    const url = manual ? "/top-movers?refresh=true" : "/top-movers";
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error("Failed to fetch top movers");
+    const payload = await response.json();
+    if (!Array.isArray(payload.data) || !payload.data.length) throw new Error("No mover data");
+    renderTopMovers(payload.data);
+    moversLastUpdated.textContent = `Last updated: ${formatMoverUpdatedTime(payload.last_updated)}`;
+    hasLoadedTopMovers = true;
+  } catch {
+    if (hasLoadedTopMovers || manual) {
+      renderMoversError();
+      moversLastUpdated.textContent = "Last updated: Unavailable";
+    } else {
+      // Keep skeletons on first load and retry quietly.
+      moversLastUpdated.textContent = "Last updated: Loading market data...";
+      setTimeout(() => {
+        fetchTopMovers({ manual: false });
+      }, 2500);
+    }
+  } finally {
+    clearTimeout(timeoutId);
+    if (refreshMoversBtn) {
+      refreshMoversBtn.disabled = false;
+      refreshMoversBtn.textContent = "🔄 Refresh";
+    }
+  }
+}
+
 watchlistAddBtn.addEventListener("click", () => {
   addWatchlistTicker(watchlistInput.value);
   watchlistInput.value = "";
@@ -220,6 +331,12 @@ clearHistoryBtn.addEventListener("click", () => {
   setHistory([]);
   renderHistory();
 });
+
+if (refreshMoversBtn) {
+  refreshMoversBtn.addEventListener("click", () => {
+    fetchTopMovers({ manual: true });
+  });
+}
 
 function setMode(mode) {
   currentMode = mode;
@@ -350,6 +467,9 @@ function renderPrediction(prediction) {
   confidenceBar.className = `progress-bar ${tone}`;
   confidenceValue.textContent = `${prediction.confidence.toFixed(1)}%`;
   actionLine.textContent = prediction.action;
+  const tradeAction = signal === "BEARISH" ? "SELL" : "BUY";
+  tradeSignalBtn.href = `/portfolio?ticker=${encodeURIComponent(prediction.ticker)}&action=${tradeAction}`;
+  tradeSignalBtn.classList.remove("hidden");
   aiExplanation.textContent = prediction.explanation;
 
   const technicals = prediction.indicators;
@@ -450,5 +570,6 @@ form.addEventListener("submit", async (event) => {
 
 renderWatchlist();
 renderHistory();
+fetchTopMovers({ manual: false });
 applyTheme(localStorage.getItem(THEME_KEY) || "light");
 setMode("casual");

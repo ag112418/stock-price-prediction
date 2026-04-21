@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import shap
 import ta
 import yfinance as yf
 from together import Together
@@ -78,7 +79,7 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def train_and_predict(
     df: pd.DataFrame,
-) -> tuple[str, float, float, XGBClassifier, pd.DataFrame, pd.Series, dict[str, float]]:
+) -> tuple[str, float, float, XGBClassifier, pd.DataFrame, pd.DataFrame, pd.Series, dict[str, float]]:
     work = df.copy()
     work["target"] = np.where(work["Close"].shift(-10) > work["Close"] * 1.02, 1, 0)
     work = work.iloc[:-10].copy()
@@ -116,7 +117,7 @@ def train_and_predict(
     signal, confidence = _signal_and_confidence(probability)
     features = {k: float(v) for k, v in x_last.iloc[0].to_dict().items()}
     features["Close"] = float(work["Close"].iloc[-1])
-    return signal, confidence, probability, model, x_test, y_test, features
+    return signal, confidence, probability, model, x_train, x_test, y_test, features
 
 
 def run_backtest(model: XGBClassifier, x_test: pd.DataFrame, y_test: pd.Series) -> tuple[float, float, float]:
@@ -185,6 +186,27 @@ def compute_risk_metrics(df: pd.DataFrame) -> tuple[float, float, float]:
     volatility = float(stock_ret.tail(30).std() * np.sqrt(252) * 100)
     var_95 = float(-1 * np.percentile(stock_ret.tail(252), 5) * 100)
     return beta, volatility, var_95
+
+
+def compute_shap_values(
+    model: XGBClassifier, x_train: pd.DataFrame, x_last_row: pd.DataFrame
+) -> list[dict[str, float | str]]:
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(x_last_row)
+
+    feature_names = x_train.columns.tolist()
+    shap_list: list[dict[str, float | str]] = []
+    for i, name in enumerate(feature_names):
+        shap_list.append(
+            {
+                "feature": name,
+                "value": round(float(shap_values[0][i]), 4),
+                "feature_value": round(float(x_last_row.iloc[0][name]), 4),
+            }
+        )
+
+    shap_list.sort(key=lambda x: abs(float(x["value"])), reverse=True)
+    return shap_list[:8]
 
 
 def get_llm_explanation(ticker, signal, confidence, features, mode, sentiment_label="NEUTRAL", sentiment_score=0.0):

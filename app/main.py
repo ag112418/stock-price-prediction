@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import concurrent.futures
 from pathlib import Path
+import time
 
 from dotenv import load_dotenv
 import os
@@ -15,6 +17,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+import pandas as pd
+import yfinance as yf
 
 from app.predictor import (
     check_earnings_warning,
@@ -32,11 +36,119 @@ BASE_DIR = Path(__file__).resolve().parent
 app = FastAPI(title="Stock Price Predictor")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+_top_movers_cache: dict[str, object] = {"data": None, "timestamp": 0.0}
+
+
+def get_top_movers() -> list[dict[str, object]]:
+    universe = [
+        "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA",
+        "META", "NFLX", "AMD", "INTC", "CRM", "ORCL",
+        "ADBE", "PYPL", "UBER", "LYFT", "SNAP", "SPOT",
+        "JPM", "BAC", "GS", "MS", "WFC", "C",
+        "JNJ", "PFE", "MRNA", "UNH", "CVS",
+        "XOM", "CVX", "BP", "COP",
+        "WMT", "TGT", "COST", "AMZN",
+        "BA", "CAT", "GE", "MMM",
+        "DIS", "CMCSA", "T", "VZ",
+        "BRK-B", "V", "MA", "AXP",
+    ]
+
+    results: list[dict[str, object]] = []
+    data = yf.download(
+        universe,
+        period="2d",
+        interval="1d",
+        group_by="ticker",
+        auto_adjust=True,
+        progress=False,
+        threads=True,
+    )
+
+    if isinstance(data, pd.DataFrame) and data.empty:
+        return []
+
+    for ticker in universe:
+        try:
+            if ticker not in data.columns.get_level_values(0):
+                continue
+            closes = data[ticker]["Close"].dropna()
+            if len(closes) < 2:
+                continue
+
+            current = float(closes.iloc[-1])
+            previous = float(closes.iloc[-2])
+            if previous == 0:
+                continue
+            change = current - previous
+            change_pct = (change / previous) * 100
+
+            # Keep this endpoint responsive by using batched data only.
+            company = ticker
+            volume_series = data[ticker]["Volume"].dropna() if "Volume" in data[ticker] else pd.Series(dtype="float64")
+            volume = int(float(volume_series.iloc[-1])) if not volume_series.empty else 0
+
+            results.append(
+                {
+                    "ticker": ticker,
+                    "company": company,
+                    "price": round(current, 2),
+                    "change": round(change, 2),
+                    "change_pct": round(change_pct, 2),
+                    "volume": volume,
+                    "abs_change_pct": abs(change_pct),
+                }
+            )
+        except Exception:
+            continue
+
+    results.sort(key=lambda item: float(item["abs_change_pct"]), reverse=True)
+    top5 = results[:5]
+    for item in top5:
+        item.pop("abs_change_pct", None)
+    return top5
+
+
+def get_top_movers_with_timeout() -> list[dict[str, object]]:
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(get_top_movers)
+    try:
+        return future.result(timeout=15)
+    except concurrent.futures.TimeoutError:
+        return []
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "index.html")
+
+
+@app.get("/portfolio", response_class=HTMLResponse)
+async def portfolio_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "portfolio.html")
+
+
+@app.get("/top-movers")
+async def top_movers(refresh: bool = False) -> JSONResponse:
+    global _top_movers_cache
+    now = time.time()
+    cached = _top_movers_cache.get("data")
+    timestamp = float(_top_movers_cache.get("timestamp", 0.0))
+
+    if not refresh and cached is not None and now - timestamp < 300:
+        return JSONResponse({"data": cached, "last_updated": int(timestamp)})
+
+    data = get_top_movers_with_timeout()
+    if len(data) >= 3:
+        _top_movers_cache = {"data": data, "timestamp": now}
+        return JSONResponse({"data": data, "last_updated": int(now)})
+
+    # Avoid caching empty/tiny results; fall back to last known cache if available.
+    if isinstance(cached, list) and cached:
+        return JSONResponse({"data": cached, "last_updated": int(timestamp)})
+
+    return JSONResponse({"data": data, "last_updated": int(now)})
 
 
 class PredictBody(BaseModel):
@@ -48,7 +160,7 @@ class PredictBody(BaseModel):
 def _build_response(ticker: str, years: int, mode: str) -> dict:
     raw_df = get_stock_data(ticker, years)
     df_features = compute_features(raw_df)
-    signal, confidence, probability, model, x_test, y_test, features = train_and_predict(df_features)
+    signal, confidence, probability, model, _x_train, x_test, y_test, features = train_and_predict(df_features)
     win_rate, sharpe, max_drawdown = run_backtest(model, x_test, y_test)
     multi_tf = multi_timeframe_signals(df_features, model)
     beta, volatility, var_95 = compute_risk_metrics(raw_df)
@@ -116,3 +228,16 @@ async def predict(body: PredictBody) -> JSONResponse:
 @app.post("/api/predict")
 async def predict_api(body: PredictBody) -> JSONResponse:
     return await predict(body)
+
+
+@app.get("/stock-price/{ticker}")
+async def stock_price(ticker: str) -> JSONResponse:
+    try:
+        ticker_obj = yf.Ticker(ticker.upper())
+        history = ticker_obj.history(period="1d")
+        if history.empty:
+            raise ValueError("No price data available.")
+        price = float(history["Close"].iloc[-1])
+        return JSONResponse({"ticker": ticker.upper(), "price": round(price, 2)})
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Unable to fetch price for {ticker.upper()}: {exc}") from exc
