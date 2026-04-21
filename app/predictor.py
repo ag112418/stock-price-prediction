@@ -6,9 +6,9 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import requests
 import ta
 import yfinance as yf
+from together import Together
 from sklearn.model_selection import train_test_split
 from xgboost import XGBClassifier
 
@@ -187,71 +187,52 @@ def compute_risk_metrics(df: pd.DataFrame) -> tuple[float, float, float]:
     return beta, volatility, var_95
 
 
-def get_llm_explanation(
-    ticker: str, signal: str, confidence: float, features: dict[str, float], mode: str
-) -> str:
-    rsi = float(features.get("rsi", 50.0))
-    macd_diff = float(features.get("macd_diff", 0.0))
-    close_value = float(features.get("Close", features.get("ema20", 0.0)))
-    ema50 = float(features.get("ema50", 0.0))
-
-    if rsi > 70:
-        rsi_interp = "overbought"
-    elif rsi < 30:
-        rsi_interp = "oversold"
-    else:
-        rsi_interp = "neutral"
-    macd_interp = "bullish momentum" if macd_diff > 0 else "bearish momentum"
-    ema_interp = "above" if close_value > ema50 else "below"
-
-    if mode == "advanced":
-        prompt = (
-            "You are a quantitative analyst explaining a stock signal to an experienced trader.\n"
-            f"Stock: {ticker}\n"
-            f"Signal: {signal} with {confidence:.0f}% confidence\n"
-            f"RSI: {rsi:.1f} ({rsi_interp})\n"
-            f"MACD histogram: {macd_diff:.3f} ({macd_interp})\n"
-            f"Price vs EMA50: {ema_interp}\n"
-            "Provide a 2-3 sentence technical analysis summary of why these indicators support this signal. "
-            "Use proper trading terminology. Do not give financial advice."
-        )
-    else:
-        prompt = (
-            "You are a friendly financial assistant explaining a stock prediction to a beginner investor.\n"
-            f"Stock: {ticker}\n"
-            f"Signal: {signal} with {confidence:.0f}% confidence\n"
-            f"Key indicators: RSI is {rsi:.1f} ({rsi_interp}), "
-            f"MACD histogram is {macd_diff:.3f} ({macd_interp}), "
-            f"price is {ema_interp} its 50-day average.\n"
-            "Write 2-3 sentences in plain English explaining why the model is giving this signal. "
-            "Avoid jargon. Do not give financial advice."
-        )
-
-    api_key = os.getenv("TOGETHER_API_KEY", "")
-    if not api_key:
-        return "AI explanation unavailable. Signal is based on ML model output."
-
+def get_llm_explanation(ticker, signal, confidence, features, mode):
     try:
-        response = requests.post(
-            "https://api.together.xyz/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "model": "meta-llama/Llama-3-70b-chat-hf",
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 200,
-                "temperature": 0.7,
-            },
-            timeout=30,
+        client = Together(api_key=os.getenv("TOGETHER_API_KEY"))
+
+        rsi = features.get("rsi", 50)
+        macd_diff = features.get("macd_diff", 0)
+        ema20 = features.get("ema20", 0)
+        ema50 = features.get("ema50", 0)
+        ema_interp = "above" if ema20 > ema50 else "below"
+        rsi_interp = "overbought" if rsi > 70 else "oversold" if rsi < 30 else "neutral"
+        macd_interp = "bullish momentum" if macd_diff > 0 else "bearish momentum"
+
+        if mode == "casual":
+            prompt = f"""You are a friendly financial assistant explaining 
+            a stock prediction to a beginner investor.
+            Stock: {ticker}
+            Signal: {signal} with {confidence:.0f}% confidence
+            RSI is {rsi:.1f} ({rsi_interp}), MACD shows {macd_interp}, 
+            price is {ema_interp} its 50-day average.
+            Write 2-3 sentences in plain English explaining why the model 
+            is giving this signal. Avoid jargon. 
+            Do not give financial advice."""
+        else:
+            prompt = f"""You are a quantitative analyst explaining a stock 
+            signal to an experienced trader.
+            Stock: {ticker}
+            Signal: {signal} with {confidence:.0f}% confidence
+            RSI: {rsi:.1f} ({rsi_interp})
+            MACD histogram: {macd_diff:.3f} ({macd_interp})
+            Price vs EMA50: {ema_interp}
+            Provide a 2-3 sentence technical analysis summary. 
+            Use proper trading terminology. 
+            Do not give financial advice."""
+
+        response = client.chat.completions.create(
+            model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=200,
+            temperature=0.7,
+            stream=False
         )
-        response.raise_for_status()
-        payload = response.json()
-        return (
-            payload.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "AI explanation unavailable. Signal is based on ML model output.")
-            .strip()
-        )
-    except Exception:
+
+        return response.choices[0].message.content
+
+    except Exception as e:
+        print(f"Together SDK error: {e}")
         return "AI explanation unavailable. Signal is based on ML model output."
 
 

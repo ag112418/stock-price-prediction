@@ -3,6 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from dotenv import load_dotenv
+import os
+
+# Always load project root .env (repo root), not dependent on cwd
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(_env_path, override=True)
+print("DEBUG: TOGETHER KEY AT STARTUP =", os.getenv("TOGETHER_API_KEY"))
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,8 +26,6 @@ from app.predictor import (
     run_backtest,
     train_and_predict,
 )
-
-load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
 

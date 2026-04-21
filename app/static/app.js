@@ -33,7 +33,6 @@ let currentMode = "casual";
 let lastPrediction = null;
 let candleChart;
 let volumeChart;
-let macdChart;
 
 function setMode(mode) {
   currentMode = mode;
@@ -77,10 +76,8 @@ function destroyChart(chartRef) {
 function renderAdvancedCharts(chartData) {
   const candleCtx = document.getElementById("candle-chart").getContext("2d");
   const volumeCtx = document.getElementById("volume-chart").getContext("2d");
-  const macdCtx = document.getElementById("macd-chart")?.getContext("2d");
   destroyChart(candleChart);
   destroyChart(volumeChart);
-  destroyChart(macdChart);
 
   const candles = chartData.dates.map((d, i) => ({
     x: new Date(`${d}T00:00:00Z`).getTime(),
@@ -132,14 +129,6 @@ function renderAdvancedCharts(chartData) {
       scales: { x: { type: "time", display: false } },
     },
   });
-
-  if (macdCtx) {
-    macdChart = new Chart(macdCtx, {
-      type: "bar",
-      data: { datasets: [{ label: "MACD Histogram", data: [], backgroundColor: "#64748b" }] },
-      options: { parsing: false, plugins: { legend: { display: false } }, scales: { x: { type: "time", display: false } } },
-    });
-  }
 }
 
 function renderCards(target, cards) {
