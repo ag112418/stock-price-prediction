@@ -17,6 +17,12 @@ const backtestCards = document.getElementById("backtest-cards");
 const riskCards = document.getElementById("risk-cards");
 const timeframeTable = document.getElementById("timeframe-table");
 const earningsBanner = document.getElementById("earnings-banner");
+const watchlistInput = document.getElementById("watchlist-input");
+const watchlistAddBtn = document.getElementById("watchlist-add-btn");
+const watchlistList = document.getElementById("watchlist-list");
+const historyTableBody = document.getElementById("history-table-body");
+const historyTableWrap = document.getElementById("history-table-wrap");
+const clearHistoryBtn = document.getElementById("clear-history-btn");
 const placeholders = {
   candle: document.getElementById("ph-candle"),
   volume: document.getElementById("ph-volume"),
@@ -31,6 +37,174 @@ let currentMode = "casual";
 let lastPrediction = null;
 let candleChart;
 let volumeChart;
+const WATCHLIST_KEY = "watchlist";
+const HISTORY_KEY = "predictionHistory";
+
+function signalTone(signal) {
+  const value = String(signal || "NEUTRAL").toUpperCase();
+  if (value === "BULLISH") return "positive";
+  if (value === "BEARISH") return "negative";
+  return "neutral";
+}
+
+function getWatchlist() {
+  try {
+    return JSON.parse(localStorage.getItem(WATCHLIST_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function setWatchlist(data) {
+  localStorage.setItem(WATCHLIST_KEY, JSON.stringify(data));
+}
+
+function getHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function setHistory(data) {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(data));
+}
+
+function formatTimestamp(timestamp) {
+  if (!timestamp) return "Never";
+  const dt = new Date(timestamp);
+  if (Number.isNaN(dt.getTime())) return "Unknown";
+  return dt.toLocaleString();
+}
+
+function runPredictionForTicker(ticker) {
+  document.getElementById("symbol").value = ticker;
+  form.requestSubmit();
+}
+
+function renderWatchlist() {
+  const watchlist = getWatchlist();
+  const tickers = Object.keys(watchlist).sort();
+  if (!tickers.length) {
+    watchlistList.innerHTML = '<div class="muted">No tickers saved yet.</div>';
+    return;
+  }
+
+  watchlistList.innerHTML = tickers
+    .map((ticker) => {
+      const item = watchlist[ticker] || {};
+      const signal = String(item.signal || "NEUTRAL").toUpperCase();
+      const tone = signalTone(signal);
+      const confidence = Number(item.confidence || 0);
+      const updated = formatTimestamp(item.lastUpdated);
+      return `<div class="watchlist-row" data-ticker="${ticker}">
+        <button type="button" class="watchlist-ticker-btn" data-ticker="${ticker}">${ticker}</button>
+        <span class="mini-signal-badge ${tone}">${signal}</span>
+        <span class="watchlist-meta">${confidence.toFixed(1)}% · ${updated}</span>
+        <button type="button" class="watchlist-remove-btn" data-ticker="${ticker}" aria-label="Remove ${ticker}">×</button>
+      </div>`;
+    })
+    .join("");
+}
+
+function renderHistory() {
+  const history = getHistory();
+  historyTableWrap.classList.toggle("history-scroll", history.length > 4);
+  if (!history.length) {
+    historyTableBody.innerHTML = '<tr><td colspan="4" class="muted">No predictions yet.</td></tr>';
+    return;
+  }
+  historyTableBody.innerHTML = history
+    .map((row) => {
+      const signal = String(row.signal || "NEUTRAL").toUpperCase();
+      const tone = signalTone(signal);
+      return `<tr>
+        <td>${row.ticker || ""}</td>
+        <td><span class="mini-signal-badge ${tone}">${signal}</span></td>
+        <td>${Number(row.confidence || 0).toFixed(1)}%</td>
+        <td>${formatTimestamp(row.timestamp)}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
+function addWatchlistTicker(tickerRaw) {
+  const ticker = String(tickerRaw || "").trim().toUpperCase();
+  if (!ticker) return;
+  const watchlist = getWatchlist();
+  const existing = watchlist[ticker] || {};
+  watchlist[ticker] = {
+    signal: existing.signal || "NEUTRAL",
+    confidence: Number(existing.confidence || 0),
+    lastUpdated: existing.lastUpdated || new Date().toISOString(),
+  };
+  setWatchlist(watchlist);
+  renderWatchlist();
+}
+
+function updateWatchlistFromPrediction(prediction) {
+  const ticker = String(prediction.ticker || "").toUpperCase();
+  if (!ticker) return;
+  const watchlist = getWatchlist();
+  if (!watchlist[ticker]) return;
+  watchlist[ticker] = {
+    signal: String(prediction.signal || "NEUTRAL").toUpperCase(),
+    confidence: Number(prediction.confidence || 0),
+    lastUpdated: new Date().toISOString(),
+  };
+  setWatchlist(watchlist);
+  renderWatchlist();
+}
+
+function addHistoryFromPrediction(prediction) {
+  const entry = {
+    ticker: String(prediction.ticker || "").toUpperCase(),
+    signal: String(prediction.signal || "NEUTRAL").toUpperCase(),
+    confidence: Number(prediction.confidence || 0),
+    timestamp: new Date().toISOString(),
+    price: null,
+  };
+  const history = getHistory();
+  history.unshift(entry);
+  const capped = history.slice(0, 10);
+  setHistory(capped);
+  renderHistory();
+}
+
+watchlistAddBtn.addEventListener("click", () => {
+  addWatchlistTicker(watchlistInput.value);
+  watchlistInput.value = "";
+});
+
+watchlistInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  addWatchlistTicker(watchlistInput.value);
+  watchlistInput.value = "";
+});
+
+watchlistList.addEventListener("click", (event) => {
+  const removeBtn = event.target.closest(".watchlist-remove-btn");
+  if (removeBtn) {
+    const ticker = removeBtn.dataset.ticker;
+    const watchlist = getWatchlist();
+    delete watchlist[ticker];
+    setWatchlist(watchlist);
+    renderWatchlist();
+    return;
+  }
+
+  const tickerBtn = event.target.closest(".watchlist-ticker-btn");
+  if (tickerBtn) {
+    runPredictionForTicker(tickerBtn.dataset.ticker);
+  }
+});
+
+clearHistoryBtn.addEventListener("click", () => {
+  setHistory([]);
+  renderHistory();
+});
 
 function setMode(mode) {
   currentMode = mode;
@@ -195,6 +369,8 @@ function renderPrediction(prediction) {
   renderAdvancedCharts(prediction.chart_data);
   placeholders.candle.classList.add("hidden");
   placeholders.volume.classList.add("hidden");
+  updateWatchlistFromPrediction(prediction);
+  addHistoryFromPrediction(prediction);
   setMode(currentMode);
 }
 
@@ -238,4 +414,6 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
+renderWatchlist();
+renderHistory();
 setMode("casual");

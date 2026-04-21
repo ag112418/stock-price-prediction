@@ -89,6 +89,15 @@ h2 {
   display: grid;
   grid-template-columns: 1fr 1.2fr;
   gap: 18px;
+  align-items: start;
+}
+
+.left-column {
+  display: grid;
+  gap: 18px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .form {
@@ -137,6 +146,98 @@ button {
 
 button:hover {
   background: var(--accent-hover);
+}
+
+.watchlist-add-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.watchlist-list {
+  display: grid;
+  gap: 8px;
+}
+
+.watchlist-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  background: #fff;
+}
+
+.watchlist-ticker-btn {
+  background: transparent;
+  color: #111827;
+  border: none;
+  padding: 0;
+  font-weight: 700;
+  text-align: left;
+}
+
+.watchlist-ticker-btn:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.watchlist-meta {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.watchlist-remove-btn {
+  background: transparent;
+  color: #6b7280;
+  border: none;
+  padding: 0 4px;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.watchlist-remove-btn:hover {
+  background: transparent;
+  color: #991b1b;
+}
+
+.mini-signal-badge {
+  font-size: 0.68rem;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.mini-signal-badge.positive {
+  background: #e7f7ec;
+  color: #166534;
+}
+
+.mini-signal-badge.negative {
+  background: #feeceb;
+  color: #991b1b;
+}
+
+.mini-signal-badge.neutral {
+  background: #eef2f7;
+  color: #334155;
+}
+
+.clear-history-btn {
+  margin-top: 10px;
+}
+
+.history-table-wrap {
+  overflow: visible;
+}
+
+.history-table-wrap.history-scroll {
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .result-header {
@@ -430,6 +531,12 @@ canvas {
 @media (max-width: 900px) {
   .grid {
     grid-template-columns: 1fr;
+  }
+
+  .left-column {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
   }
 
   .cards-3 {

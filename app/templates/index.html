@@ -26,26 +26,50 @@
       </section>
 
       <section class="grid">
-        <section class="card">
-          <h2>Input</h2>
-          <form id="predict-form" class="form">
-            <div class="field">
-              <label for="symbol">Ticker symbol</label>
-              <input id="symbol" name="symbol" type="text" placeholder="AAPL" required />
-            </div>
+        <section class="left-column">
+          <section class="card">
+            <h2>Input</h2>
+            <form id="predict-form" class="form">
+              <div class="field">
+                <label for="symbol">Ticker symbol</label>
+                <input id="symbol" name="symbol" type="text" placeholder="AAPL" required />
+              </div>
 
-            <div class="field">
-              <label for="lookback_years">Historical window</label>
-              <select id="lookback_years" name="lookback_years">
-                <option value="5">5 years</option>
-                <option value="8" selected>8 years</option>
-                <option value="10">10 years</option>
-                <option value="12">12 years</option>
-              </select>
-            </div>
+              <div class="field">
+                <label for="lookback_years">Historical window</label>
+                <select id="lookback_years" name="lookback_years">
+                  <option value="5">5 years</option>
+                  <option value="8" selected>8 years</option>
+                  <option value="10">10 years</option>
+                  <option value="12">12 years</option>
+                </select>
+              </div>
 
-            <button type="submit" id="submit-btn">Run Prediction</button>
-          </form>
+              <button type="submit" id="submit-btn">Run Prediction</button>
+            </form>
+          </section>
+
+          <section class="card">
+            <h2>Watchlist</h2>
+            <div class="watchlist-add-row">
+              <input id="watchlist-input" type="text" placeholder="Add ticker (e.g. AAPL)" />
+              <button type="button" id="watchlist-add-btn">Add</button>
+            </div>
+            <div id="watchlist-list" class="watchlist-list"></div>
+          </section>
+
+          <section class="card">
+            <h2>Prediction History</h2>
+            <div id="history-table-wrap" class="history-table-wrap">
+              <table class="signal-table">
+                <thead>
+                  <tr><th>Ticker</th><th>Signal</th><th>Confidence</th><th>Date/Time</th></tr>
+                </thead>
+                <tbody id="history-table-body"></tbody>
+              </table>
+            </div>
+            <button type="button" id="clear-history-btn" class="clear-history-btn">Clear History</button>
+          </section>
         </section>
 
         <section class="card">
