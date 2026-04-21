@@ -1,5 +1,6 @@
 const form = document.getElementById("predict-form");
 const statusBadge = document.getElementById("status-badge");
+const resultError = document.getElementById("result-error");
 const submitButton = document.getElementById("submit-btn");
 const modeCasualBtn = document.getElementById("mode-casual");
 const modeAdvancedBtn = document.getElementById("mode-advanced");
@@ -9,9 +10,15 @@ const emptyState = document.getElementById("empty-state");
 const signalBadge = document.getElementById("signal-badge");
 const confidenceBar = document.getElementById("confidence-bar");
 const confidenceValue = document.getElementById("confidence-value");
-const actionLine = document.getElementById("action-line");
+const signalStrengthLabel = document.getElementById("signal-strength-label");
 const tradeSignalBtn = document.getElementById("trade-signal-btn");
 const aiExplanation = document.getElementById("ai-explanation");
+const casualReasonsList = document.getElementById("casual-reasons-list");
+const casualActionsList = document.getElementById("casual-actions-list");
+const casualLearnToggle = document.getElementById("casual-learn-toggle");
+const casualLearnContent = document.getElementById("casual-learn-content");
+const casualLearnText = document.getElementById("casual-learn-text");
+const casualLearnChevron = document.getElementById("casual-learn-chevron");
 const themeToggle = document.getElementById("theme-toggle");
 const technicalGrid = document.getElementById("technical-grid");
 const backtestCards = document.getElementById("backtest-cards");
@@ -19,6 +26,8 @@ const riskCards = document.getElementById("risk-cards");
 const timeframeTable = document.getElementById("timeframe-table");
 const earningsBanner = document.getElementById("earnings-banner");
 const watchlistInput = document.getElementById("watchlist-input");
+const yearsSelect = document.getElementById("years-select");
+const windowWarning = document.getElementById("window-warning");
 const watchlistAddBtn = document.getElementById("watchlist-add-btn");
 const watchlistList = document.getElementById("watchlist-list");
 const historyTableBody = document.getElementById("history-table-body");
@@ -26,6 +35,7 @@ const historyTableWrap = document.getElementById("history-table-wrap");
 const clearHistoryBtn = document.getElementById("clear-history-btn");
 const topMoversList = document.getElementById("top-movers-list");
 const moversLastUpdated = document.getElementById("movers-last-updated");
+const refreshCountdown = document.getElementById("refresh-countdown");
 const refreshMoversBtn = document.getElementById("refresh-movers-btn");
 const placeholders = {
   candle: document.getElementById("ph-candle"),
@@ -45,13 +55,168 @@ const WATCHLIST_KEY = "watchlist";
 const HISTORY_KEY = "predictionHistory";
 const THEME_KEY = "theme";
 const TOP_MOVERS_TIMEOUT_MS = 20000;
+const TOP_MOVERS_INTERVAL = 5 * 60 * 1000;
 let hasLoadedTopMovers = false;
+
+const WINDOW_WARNING_MESSAGES = {
+  "2": {
+    tone: "blue",
+    text: "ℹ️ 2 years captures the recent Fed rate cycle and post-COVID market normalization. Good for current market conditions.",
+  },
+  "3": {
+    tone: "blue",
+    text: "ℹ️ 3 years balances recency with enough data for reliable pattern recognition. A solid choice for medium-term analysis.",
+  },
+  "10": {
+    tone: "blue",
+    text: "ℹ️ 10 years includes multiple market cycles — 2015 correction, 2018 selloff, COVID crash, and 2022 bear market. Best for long-term pattern analysis.",
+  },
+};
 
 function signalTone(signal) {
   const value = String(signal || "NEUTRAL").toUpperCase();
   if (value === "BULLISH") return "positive";
   if (value === "BEARISH") return "negative";
   return "neutral";
+}
+
+function updateWindowWarning() {
+  if (!yearsSelect || !windowWarning) return;
+  const selected = yearsSelect.value;
+  const info = WINDOW_WARNING_MESSAGES[selected];
+  if (!info) {
+    windowWarning.style.display = "none";
+    windowWarning.className = "window-warning";
+    windowWarning.textContent = "";
+    return;
+  }
+  windowWarning.style.display = "block";
+  windowWarning.className = `window-warning ${info.tone}`;
+  windowWarning.textContent = info.text;
+}
+
+function getStrengthLabel(confidence) {
+  if (confidence <= 25) return "Weak";
+  if (confidence <= 50) return "Moderate";
+  if (confidence <= 75) return "Strong";
+  return "Very Strong";
+}
+
+function getCasualActions(signal) {
+  if (signal === "BEARISH") {
+    return [
+      {
+        icon: "📉",
+        title: "If you OWN this stock",
+        description: "Consider reducing your position or setting a limit on how much you're willing to lose (called a stop-loss).",
+      },
+      {
+        icon: "🚫",
+        title: "If you DON'T own this stock",
+        description: "This may not be the best time to buy. Consider waiting for a more positive signal before investing.",
+      },
+      {
+        icon: "🤝",
+        title: "Not sure what to do?",
+        description: "That's completely normal. Consider speaking with a financial advisor before making any decisions based on this signal.",
+      },
+    ];
+  }
+  if (signal === "BULLISH") {
+    return [
+      {
+        icon: "📈",
+        title: "If you OWN this stock",
+        description: "The signal looks positive - you may want to hold your position and monitor it closely over the next few days.",
+      },
+      {
+        icon: "💰",
+        title: "If you DON'T own this stock",
+        description:
+          "This could be a potential opportunity, but always research the company yourself and never invest more than you can afford to lose.",
+      },
+      {
+        icon: "🤝",
+        title: "Not sure what to do?",
+        description: "Consider speaking with a financial advisor who can give you personalized guidance based on your full financial situation.",
+      },
+    ];
+  }
+  return [
+    {
+      icon: "⏸️",
+      title: "If you OWN this stock",
+      description:
+        "The signal is mixed - there's no strong reason to buy more or sell right now. Holding and monitoring is a reasonable approach.",
+    },
+    {
+      icon: "👀",
+      title: "If you DON'T own this stock",
+      description: "The signal isn't strong enough to recommend buying right now. Keep this stock on your watchlist and check back later.",
+    },
+    {
+      icon: "🤝",
+      title: "Not sure what to do?",
+      description: "Neutral signals are very common. Consider speaking with a financial advisor for guidance tailored to your goals.",
+    },
+  ];
+}
+
+function renderCasualPanel(prediction, tone) {
+  const signal = String(prediction.signal || "NEUTRAL").toUpperCase();
+  const confidence = Number(prediction.confidence || 0);
+  confidenceBar.style.width = `${confidence}%`;
+  confidenceBar.className = `progress-bar ${tone}`;
+  confidenceValue.textContent = `${confidence.toFixed(1)}%`;
+  signalStrengthLabel.textContent = getStrengthLabel(confidence);
+  aiExplanation.textContent = prediction.explanation || "Right now, our analysis is unavailable.";
+
+  const reasons = Array.isArray(prediction.casual_reasons) ? prediction.casual_reasons.slice(0, 3) : [];
+  casualReasonsList.innerHTML = reasons
+    .map((reason) => {
+      const icon = reason.icon || "🟡";
+      const toneClass = icon.includes("🔴") ? "negative" : icon.includes("🟢") ? "positive" : "neutral";
+      return `<div class="casual-reason-card">
+        <div class="casual-reason-icon ${toneClass}">${icon}</div>
+        <div>
+          <div class="casual-reason-title">${reason.title || ""}</div>
+          <div class="casual-reason-text">${reason.explanation || ""}</div>
+        </div>
+      </div>`;
+    })
+    .join("");
+
+  const actions = getCasualActions(signal);
+  casualActionsList.innerHTML = actions
+    .map(
+      (row) => `<div class="casual-action-row">
+      <div class="casual-action-icon">${row.icon}</div>
+      <div>
+        <div class="casual-action-title">${row.title}</div>
+        <div class="casual-action-text">${row.description}</div>
+      </div>
+    </div>`
+    )
+    .join("");
+
+  const signalWord = signal.charAt(0) + signal.slice(1).toLowerCase();
+  casualLearnText.textContent = `What does ${signal} mean?
+A ${signalWord.toLowerCase()} signal means our analysis thinks the stock price is more likely to ${
+    signal === "BEARISH" ? "go down" : signal === "BULLISH" ? "go up" : "move sideways"
+  } over the next 10 trading days.
+
+What did our analysis look at?
+We analyzed ${prediction.ticker}'s price history over the past ${prediction.years} years using 14 different mathematical indicators including momentum, trend direction, and trading volume.
+
+Remember:
+No prediction is guaranteed. The stock market is unpredictable and past patterns don't always repeat. Always do your own research.`;
+
+  casualLearnContent.classList.remove("open");
+  casualLearnChevron.textContent = "▼";
+  casualView.querySelectorAll(".casual-fade").forEach((node) => {
+    node.classList.remove("show");
+    requestAnimationFrame(() => node.classList.add("show"));
+  });
 }
 
 function applyTheme(theme) {
@@ -205,6 +370,33 @@ function formatMoverUpdatedTime(unixSeconds) {
   return dt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
 }
 
+function updateCountdown() {
+  if (!refreshCountdown || !window.lastTopMoversUpdate) return;
+  const now = new Date();
+  const elapsed = Math.floor((now - window.lastTopMoversUpdate) / 1000);
+  const remaining = Math.max(0, 300 - elapsed);
+  const mins = Math.floor(remaining / 60);
+  const secs = remaining % 60;
+  refreshCountdown.textContent = `Next refresh in: ${mins}:${String(secs).padStart(2, "0")}`;
+}
+
+function updateLastUpdatedTicker() {
+  if (!moversLastUpdated || !window.lastTopMoversUpdate) return;
+  const now = new Date();
+  const diff = Math.floor((now - window.lastTopMoversUpdate) / 1000);
+  if (diff >= 295) {
+    moversLastUpdated.textContent = "Refreshing...";
+    return;
+  }
+  if (diff < 60) {
+    moversLastUpdated.textContent = `Last updated: ${diff}s ago`;
+    return;
+  }
+  const mins = Math.floor(diff / 60);
+  const secs = diff % 60;
+  moversLastUpdated.textContent = `Last updated: ${mins}m ${secs}s ago`;
+}
+
 function renderMoverSkeletons() {
   if (!topMoversList) return;
   topMoversList.innerHTML = Array.from({ length: 5 })
@@ -225,7 +417,7 @@ function renderMoversError() {
     <button type="button" class="retry-movers-btn" id="retry-movers-btn">Retry</button>
   </article>`;
   const retry = document.getElementById("retry-movers-btn");
-  if (retry) retry.addEventListener("click", () => fetchTopMovers({ manual: true }));
+  if (retry) retry.addEventListener("click", () => fetchTopMovers({ forceRefresh: true, source: "manual" }));
 }
 
 function renderTopMovers(items) {
@@ -258,35 +450,38 @@ function renderTopMovers(items) {
     .join("");
 }
 
-async function fetchTopMovers({ manual = false } = {}) {
+async function fetchTopMovers({ forceRefresh = false, source = "manual" } = {}) {
   if (!topMoversList || !moversLastUpdated) return;
   renderMoverSkeletons();
-  moversLastUpdated.textContent = "Last updated: Loading market data...";
+  moversLastUpdated.textContent = "Refreshing...";
   if (refreshMoversBtn) {
     refreshMoversBtn.disabled = true;
-    refreshMoversBtn.textContent = "Loading...";
+    refreshMoversBtn.textContent = "Updating...";
+    if (source === "auto") refreshMoversBtn.classList.add("refreshing");
   }
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TOP_MOVERS_TIMEOUT_MS);
   try {
-    const url = manual ? "/top-movers?refresh=true" : "/top-movers";
+    const url = forceRefresh ? "/top-movers?refresh=true" : "/top-movers";
     const response = await fetch(url, { signal: controller.signal });
     if (!response.ok) throw new Error("Failed to fetch top movers");
     const payload = await response.json();
     if (!Array.isArray(payload.data) || !payload.data.length) throw new Error("No mover data");
     renderTopMovers(payload.data);
     moversLastUpdated.textContent = `Last updated: ${formatMoverUpdatedTime(payload.last_updated)}`;
+    window.lastTopMoversUpdate = new Date();
+    updateCountdown();
     hasLoadedTopMovers = true;
   } catch {
-    if (hasLoadedTopMovers || manual) {
+    if (hasLoadedTopMovers || source === "manual" || source === "auto") {
       renderMoversError();
       moversLastUpdated.textContent = "Last updated: Unavailable";
     } else {
       // Keep skeletons on first load and retry quietly.
       moversLastUpdated.textContent = "Last updated: Loading market data...";
       setTimeout(() => {
-        fetchTopMovers({ manual: false });
+        fetchTopMovers({ forceRefresh: false, source: "initial" });
       }, 2500);
     }
   } finally {
@@ -294,6 +489,7 @@ async function fetchTopMovers({ manual = false } = {}) {
     if (refreshMoversBtn) {
       refreshMoversBtn.disabled = false;
       refreshMoversBtn.textContent = "🔄 Refresh";
+      setTimeout(() => refreshMoversBtn.classList.remove("refreshing"), 2000);
     }
   }
 }
@@ -334,7 +530,14 @@ clearHistoryBtn.addEventListener("click", () => {
 
 if (refreshMoversBtn) {
   refreshMoversBtn.addEventListener("click", () => {
-    fetchTopMovers({ manual: true });
+    fetchTopMovers({ forceRefresh: true, source: "manual" });
+  });
+}
+
+if (casualLearnToggle) {
+  casualLearnToggle.addEventListener("click", () => {
+    const open = casualLearnContent.classList.toggle("open");
+    casualLearnChevron.textContent = open ? "▲" : "▼";
   });
 }
 
@@ -344,7 +547,7 @@ function setMode(mode) {
   modeAdvancedBtn.classList.toggle("selected", mode === "advanced");
 
   if (!lastPrediction) {
-    emptyState.classList.add("hidden");
+    emptyState.classList.remove("hidden");
     if (mode === "casual") {
       casualView.classList.remove("hidden");
       advancedView.classList.add("hidden");
@@ -463,14 +666,10 @@ function renderPrediction(prediction) {
   const tone = signal === "BULLISH" ? "positive" : signal === "BEARISH" ? "negative" : "neutral";
   signalBadge.textContent = signal;
   signalBadge.className = `signal-badge ${tone}`;
-  confidenceBar.style.width = `${prediction.confidence}%`;
-  confidenceBar.className = `progress-bar ${tone}`;
-  confidenceValue.textContent = `${prediction.confidence.toFixed(1)}%`;
-  actionLine.textContent = prediction.action;
+  renderCasualPanel(prediction, tone);
   const tradeAction = signal === "BEARISH" ? "SELL" : "BUY";
   tradeSignalBtn.href = `/portfolio?ticker=${encodeURIComponent(prediction.ticker)}&action=${tradeAction}`;
   tradeSignalBtn.classList.remove("hidden");
-  aiExplanation.textContent = prediction.explanation;
 
   const technicals = prediction.indicators;
   let rsiTone = "gray";
@@ -525,22 +724,26 @@ function renderPrediction(prediction) {
   placeholders.volume.classList.add("hidden");
   updateWatchlistFromPrediction(prediction);
   addHistoryFromPrediction(prediction);
+  emptyState.classList.add("hidden");
   setMode(currentMode);
 }
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   statusBadge.textContent = "Processing";
+  if (resultError) resultError.classList.add("hidden");
   const originalButtonText = submitButton.textContent;
   submitButton.textContent = "⏳ Analyzing...";
   submitButton.disabled = true;
-  emptyState.textContent = "Training models and generating prediction...";
-  emptyState.classList.remove("hidden");
-  casualView.classList.add("hidden");
-  advancedView.classList.add("hidden");
+  if (!lastPrediction) {
+    emptyState.textContent = "Training models and generating prediction...";
+    emptyState.classList.remove("hidden");
+    casualView.classList.add("hidden");
+    advancedView.classList.add("hidden");
+  }
   const payload = {
     ticker: document.getElementById("symbol").value.trim(),
-    years: Number(document.getElementById("lookback_years").value),
+    years: Number(yearsSelect.value),
     mode: currentMode,
   };
 
@@ -553,7 +756,19 @@ form.addEventListener("submit", async (event) => {
 
     const data = await response.json();
     if (!response.ok) {
-      emptyState.textContent = `Error: ${data.detail || "Unable to generate prediction."}`;
+      if (response.status === 400 && resultError) {
+        resultError.innerHTML = `<div class="result-error-title">Unable to run prediction</div>
+        <div>${data.detail || "Unable to generate prediction."}</div>
+        <div class="result-error-suggestion">Try selecting a longer historical window for more reliable results.</div>`;
+        resultError.classList.remove("hidden");
+        if (!lastPrediction) {
+          emptyState.classList.add("hidden");
+        } else {
+          setMode(currentMode);
+        }
+      } else {
+        emptyState.textContent = `Error: ${data.detail || "Unable to generate prediction."}`;
+      }
       statusBadge.textContent = "Error";
       return;
     }
@@ -570,6 +785,14 @@ form.addEventListener("submit", async (event) => {
 
 renderWatchlist();
 renderHistory();
-fetchTopMovers({ manual: false });
+if (yearsSelect) yearsSelect.addEventListener("change", updateWindowWarning);
+updateWindowWarning();
+fetchTopMovers({ forceRefresh: false, source: "initial" });
+setInterval(updateCountdown, 1000);
+setInterval(updateLastUpdatedTicker, 1000);
+setInterval(() => {
+  console.log("Auto-refreshing top movers...");
+  fetchTopMovers({ forceRefresh: true, source: "auto" });
+}, TOP_MOVERS_INTERVAL);
 applyTheme(localStorage.getItem(THEME_KEY) || "light");
 setMode("casual");

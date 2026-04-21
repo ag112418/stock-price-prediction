@@ -4,6 +4,7 @@ import os
 from datetime import date
 from typing import Any
 
+from fastapi import HTTPException
 import numpy as np
 import pandas as pd
 import shap
@@ -31,8 +32,13 @@ def _signal_and_confidence(probability: float) -> tuple[str, float]:
     return signal, confidence
 
 
-def get_stock_data(ticker: str, years: int) -> pd.DataFrame:
-    period = f"{years}y"
+def get_stock_data(ticker: str, years: float) -> pd.DataFrame:
+    if years == 0.25:
+        period = "3mo"
+    elif years == 0.5:
+        period = "6mo"
+    else:
+        period = f"{years:g}y"
     data = yf.download(
         ticker,
         period=period,
@@ -42,11 +48,32 @@ def get_stock_data(ticker: str, years: int) -> pd.DataFrame:
     )
     data = _normalize_columns(data)
     if data.empty:
-        raise ValueError(f"Could not fetch data for ticker: {ticker}")
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Not enough data for {ticker} with the selected time window. "
+                "Try a longer historical window for more reliable results."
+            ),
+        )
     keep = ["Open", "High", "Low", "Close", "Volume"]
     if not set(keep).issubset(data.columns):
-        raise ValueError(f"Could not fetch data for ticker: {ticker}")
-    return data[keep].copy()
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Not enough data for {ticker} with the selected time window. "
+                "Try a longer historical window for more reliable results."
+            ),
+        )
+    out = data[keep].copy()
+    if len(out) < 60:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Not enough data for {ticker} with the selected time window. "
+                "Try a longer historical window for more reliable results."
+            ),
+        )
+    return out
 
 
 def compute_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -74,6 +101,11 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     out["momentum_20"] = out["Close"] - out["Close"].shift(20)
     out["volume_ratio"] = out["Volume"] / out["Volume"].rolling(20).mean()
     out = out.dropna().copy()
+    if len(out) < 50:
+        raise HTTPException(
+            status_code=400,
+            detail="Not enough data after computing indicators. Please select a longer historical window.",
+        )
     return out
 
 
@@ -209,6 +241,109 @@ def compute_shap_values(
     return shap_list[:8]
 
 
+def get_casual_reasons(signal: str, features: dict[str, float]) -> list[dict[str, str]]:
+    rsi = features.get("rsi", 50)
+    macd_diff = features.get("macd_diff", 0)
+    ema20 = features.get("ema20", 0)
+    ema50 = features.get("ema50", 0)
+    momentum_5 = features.get("momentum_5", 0)
+
+    reasons: list[dict[str, str]] = []
+
+    if rsi > 70:
+        reasons.append(
+            {
+                "icon": "🔴",
+                "title": "Stock may be overpriced",
+                "explanation": (
+                    f"The RSI is {rsi:.0f}, which means the stock has been bought heavily and may be due for a "
+                    "price drop. Think of it like a rubber band stretched too far."
+                ),
+            }
+        )
+    elif rsi < 30:
+        reasons.append(
+            {
+                "icon": "🟢",
+                "title": "Stock may be underpriced",
+                "explanation": (
+                    f"The RSI is {rsi:.0f}, which suggests the stock has been sold heavily and could bounce back up. "
+                    "This can be a buying opportunity."
+                ),
+            }
+        )
+    else:
+        reasons.append(
+            {
+                "icon": "🟡",
+                "title": "Buying pressure is neutral",
+                "explanation": (
+                    f"The RSI is {rsi:.0f}, meaning the stock is not being overbought or oversold right now. "
+                    "It's in a balanced zone."
+                ),
+            }
+        )
+
+    if ema20 < ema50:
+        reasons.append(
+            {
+                "icon": "🔴",
+                "title": "Short-term trend is falling",
+                "explanation": (
+                    "The stock's recent average price has dropped below its longer-term average - like a car that's "
+                    "been slowing down and is now going slower than its usual speed."
+                ),
+            }
+        )
+    else:
+        reasons.append(
+            {
+                "icon": "🟢",
+                "title": "Short-term trend is rising",
+                "explanation": (
+                    "The stock's recent average price is above its longer-term average - a sign that momentum is "
+                    "building in a positive direction."
+                ),
+            }
+        )
+
+    if macd_diff < 0 and momentum_5 < 0:
+        reasons.append(
+            {
+                "icon": "🔴",
+                "title": "Recent momentum is slowing down",
+                "explanation": (
+                    "The stock has been losing speed over the past week. When a stock slows down like this, it often "
+                    "means sellers are taking control."
+                ),
+            }
+        )
+    elif macd_diff > 0 and momentum_5 > 0:
+        reasons.append(
+            {
+                "icon": "🟢",
+                "title": "Recent momentum is picking up",
+                "explanation": (
+                    "The stock has been gaining speed over the past week. This kind of momentum often signals that "
+                    "buyers are in control right now."
+                ),
+            }
+        )
+    else:
+        reasons.append(
+            {
+                "icon": "🟡",
+                "title": "Mixed momentum signals",
+                "explanation": (
+                    "Some short-term indicators are pointing up while others point down. This mixed picture suggests "
+                    "the market is uncertain about this stock right now."
+                ),
+            }
+        )
+
+    return reasons[:3]
+
+
 def get_llm_explanation(ticker, signal, confidence, features, mode, sentiment_label="NEUTRAL", sentiment_score=0.0):
     try:
         client = Together(api_key=os.getenv("TOGETHER_API_KEY"))
@@ -222,16 +357,16 @@ def get_llm_explanation(ticker, signal, confidence, features, mode, sentiment_la
         macd_interp = "bullish momentum" if macd_diff > 0 else "bearish momentum"
 
         if mode == "casual":
-            prompt = f"""You are a friendly financial assistant explaining 
-            a stock prediction to a beginner investor.
-            Stock: {ticker}
-            Signal: {signal} with {confidence:.0f}% confidence
-            Recent news sentiment: {sentiment_label} (score: {sentiment_score:.2f})
-            RSI is {rsi:.1f} ({rsi_interp}), MACD shows {macd_interp}, 
-            price is {ema_interp} its 50-day average.
-            Write 2-3 sentences in plain English explaining why the model 
-            is giving this signal. Avoid jargon. 
-            Do not give financial advice."""
+            prompt = f"""You are a friendly financial mentor explaining a stock prediction to someone who has never invested before.
+Stock: {ticker}
+Signal: {signal} with {confidence:.0f}% confidence
+RSI: {rsi:.1f} ({rsi_interp})
+MACD: {macd_interp}
+Price vs EMA50: {ema_interp}
+
+Write exactly 2 sentences maximum. Use simple everyday language - no financial jargon. Start with 'Right now,' and explain what the signal means for this stock in plain terms a 16-year-old could understand.
+Do not say 'the model' - say 'our analysis'.
+Do not give financial advice."""
         else:
             prompt = f"""You are a quantitative analyst explaining a stock 
             signal to an experienced trader.

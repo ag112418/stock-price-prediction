@@ -22,6 +22,7 @@ import yfinance as yf
 
 from app.predictor import (
     check_earnings_warning,
+    get_casual_reasons,
     compute_features,
     compute_risk_metrics,
     get_llm_explanation,
@@ -36,7 +37,7 @@ BASE_DIR = Path(__file__).resolve().parent
 app = FastAPI(title="Stock Price Predictor")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-_top_movers_cache: dict[str, object] = {"data": None, "timestamp": 0.0}
+_top_movers_cache: dict[str, object] = {"data": None, "timestamp": 0.0, "ttl": 300}
 
 
 def get_top_movers() -> list[dict[str, object]]:
@@ -133,31 +134,42 @@ async def portfolio_page(request: Request) -> HTMLResponse:
 async def top_movers(refresh: bool = False) -> JSONResponse:
     global _top_movers_cache
     now = time.time()
+    if "ttl" not in _top_movers_cache:
+        _top_movers_cache["ttl"] = 300
     cached = _top_movers_cache.get("data")
     timestamp = float(_top_movers_cache.get("timestamp", 0.0))
+    ttl = float(_top_movers_cache.get("ttl", 300))
+    cache_age = now - timestamp
+    cache_valid = (
+        isinstance(cached, list)
+        and len(cached) >= 3
+        and cache_age < ttl
+        and not refresh
+    )
 
-    if not refresh and cached is not None and now - timestamp < 300:
+    if cache_valid:
+        print(f"Returning cached top movers ({cache_age:.0f}s old)")
         return JSONResponse({"data": cached, "last_updated": int(timestamp)})
 
+    print("Fetching fresh top movers data...")
     data = get_top_movers_with_timeout()
-    if len(data) >= 3:
-        _top_movers_cache = {"data": data, "timestamp": now}
+    if data and len(data) >= 3:
+        _top_movers_cache = {"data": data, "timestamp": now, "ttl": 300}
         return JSONResponse({"data": data, "last_updated": int(now)})
 
-    # Avoid caching empty/tiny results; fall back to last known cache if available.
     if isinstance(cached, list) and cached:
         return JSONResponse({"data": cached, "last_updated": int(timestamp)})
 
-    return JSONResponse({"data": data, "last_updated": int(now)})
+    return JSONResponse({"data": [], "last_updated": int(now)})
 
 
 class PredictBody(BaseModel):
     ticker: str
-    years: int = 8
+    years: float = 8.0
     mode: str = "casual"
 
 
-def _build_response(ticker: str, years: int, mode: str) -> dict:
+def _build_response(ticker: str, years: float, mode: str) -> dict:
     raw_df = get_stock_data(ticker, years)
     df_features = compute_features(raw_df)
     signal, confidence, probability, model, _x_train, x_test, y_test, features = train_and_predict(df_features)
@@ -165,6 +177,7 @@ def _build_response(ticker: str, years: int, mode: str) -> dict:
     multi_tf = multi_timeframe_signals(df_features, model)
     beta, volatility, var_95 = compute_risk_metrics(raw_df)
     explanation = get_llm_explanation(ticker, signal, confidence, features, mode)
+    casual_reasons = get_casual_reasons(signal, features)
     earnings_warning = check_earnings_warning(ticker)
 
     recent = df_features.tail(60)
@@ -180,7 +193,9 @@ def _build_response(ticker: str, years: int, mode: str) -> dict:
         "confidence": round(confidence, 1),
         "probability": round(probability, 3),
         "action": action,
+        "years": years,
         "explanation": explanation,
+        "casual_reasons": casual_reasons,
         "backtest": {
             "win_rate": round(win_rate, 1),
             "sharpe": round(sharpe, 2),
@@ -219,6 +234,8 @@ async def predict(body: PredictBody) -> JSONResponse:
     try:
         payload = _build_response(body.ticker, body.years, body.mode)
         return JSONResponse(payload)
+    except HTTPException as exc:
+        raise exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:

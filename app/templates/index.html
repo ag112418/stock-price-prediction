@@ -12,7 +12,7 @@
         } catch (_) {}
       })();
     </script>
-    <link rel="stylesheet" href="/static/styles.css?v=20260421d" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260421h" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
@@ -44,6 +44,7 @@
             <h2>Top Movers Today</h2>
             <p class="movers-subtitle">Stocks with the highest % price movement - updated every 5 minutes</p>
             <p id="movers-last-updated" class="movers-last-updated">Last updated: --</p>
+            <p id="refresh-countdown" class="refresh-countdown">Next refresh in: 5:00</p>
           </div>
           <button type="button" id="refresh-movers-btn" class="refresh-movers-btn">🔄 Refresh</button>
         </div>
@@ -61,13 +62,16 @@
               </div>
 
               <div class="field">
-                <label for="lookback_years">Historical window</label>
-                <select id="lookback_years" name="lookback_years">
+                <label for="years-select">Historical window</label>
+                <p class="helper-text">More data = more reliable predictions. Shorter windows focus on recent trends.</p>
+                <select id="years-select" name="lookback_years">
+                  <option value="2">2 years</option>
+                  <option value="3">3 years</option>
                   <option value="5">5 years</option>
                   <option value="8" selected>8 years</option>
                   <option value="10">10 years</option>
-                  <option value="12">12 years</option>
                 </select>
+                <div id="window-warning" class="window-warning" style="display:none;"></div>
               </div>
 
               <button type="submit" id="submit-btn">Run Prediction</button>
@@ -103,20 +107,47 @@
               <h2>Result</h2>
               <span id="status-badge" class="badge">Ready</span>
             </div>
+            <div id="result-error" class="result-error hidden"></div>
             <div id="empty-state" class="panel muted">Run a prediction to see dashboard insights.</div>
 
             <div id="casual-view" class="view hidden">
               <div id="signal-badge" class="signal-badge neutral">NEUTRAL</div>
-              <div class="metric-row">
-                <div class="metric-label">Confidence</div>
-                <div class="progress-wrap">
+              <div class="casual-block casual-fade" id="signal-strength-block">
+                <div class="casual-row-head">
+                  <span class="metric-label">Signal Strength</span>
+                  <span id="confidence-value" class="metric-value">0%</span>
+                </div>
+                <div class="progress-wrap strength-wrap">
                   <div id="confidence-bar" class="progress-bar"></div>
                 </div>
-                <span id="confidence-value" class="metric-value">0%</span>
+                <div id="signal-strength-label" class="strength-label">Weak</div>
               </div>
-              <div id="action-line" class="action-line">Hold</div>
+
+              <div class="casual-block casual-fade casual-meaning">
+                <div class="casual-meaning-icon">💬</div>
+                <p id="ai-explanation" class="casual-meaning-text"></p>
+              </div>
+
+              <div class="casual-block casual-fade">
+                <h3 class="casual-title">Why our analysis says this:</h3>
+                <div id="casual-reasons-list" class="casual-reasons-list"></div>
+              </div>
+
+              <div class="casual-block casual-fade">
+                <h3 class="casual-title">What should I do?</h3>
+                <div id="casual-actions-list" class="casual-actions-list"></div>
+              </div>
+
+              <div class="casual-block casual-fade">
+                <button type="button" id="casual-learn-toggle" class="casual-learn-toggle">
+                  📚 Learn more about this signal <span id="casual-learn-chevron">▼</span>
+                </button>
+                <div id="casual-learn-content" class="casual-learn-content">
+                  <p id="casual-learn-text"></p>
+                </div>
+              </div>
+
               <a id="trade-signal-btn" class="trade-signal-btn hidden" href="/portfolio">Trade on this signal</a>
-              <p id="ai-explanation" class="panel"></p>
             </div>
 
             <div id="advanced-view" class="view hidden">
@@ -173,6 +204,6 @@
       financial advisor before making any investment decisions. The creators of this tool are not responsible for any
       financial losses incurred from using this tool.
     </div>
-    <script src="/static/app.js?v=20260421d"></script>
+    <script src="/static/app.js?v=20260421h"></script>
   </body>
 </html>
