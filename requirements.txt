@@ -9,3 +9,5 @@ numpy
 scikit-learn
 xgboost
 yfinance
+ta
+requests

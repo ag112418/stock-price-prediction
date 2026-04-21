@@ -5,35 +5,122 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Stock Price Predictor</title>
     <link rel="stylesheet" href="/static/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
   </head>
   <body>
-    <main class="container">
-      <h1>Stock Price Predictor</h1>
-      <p>
-        Enter a stock ticker and run an ML prediction for next-day gain
-        probability based on historical OHLCV behavior.
-      </p>
+    <main class="page">
+      <section class="hero card">
+        <p class="eyebrow">Stock Forecast Assistant</p>
+        <h1>Stock Prediction Dashboard</h1>
+        <p class="subtext">
+          Clean ML-based signal using historical OHLCV data, with an optional AI
+          explanation for quick interpretation.
+        </p>
+      </section>
 
-      <form id="predict-form">
-        <label for="symbol">Stock ticker symbol</label>
-        <input id="symbol" name="symbol" type="text" placeholder="AAPL" required />
+      <section class="mode-toggle card">
+        <button type="button" id="mode-casual" class="mode-btn selected">Casual Investor</button>
+        <button type="button" id="mode-advanced" class="mode-btn">Advanced / Trader</button>
+      </section>
 
-        <label for="lookback_years">Historical window (years)</label>
-        <select id="lookback_years" name="lookback_years">
-          <option value="5">5 years</option>
-          <option value="8" selected>8 years</option>
-          <option value="10">10 years</option>
-          <option value="12">12 years</option>
-        </select>
+      <section class="grid">
+        <section class="card">
+          <h2>Input</h2>
+          <form id="predict-form" class="form">
+            <div class="field">
+              <label for="symbol">Ticker symbol</label>
+              <input id="symbol" name="symbol" type="text" placeholder="AAPL" required />
+            </div>
 
-        <button type="submit">Run Prediction</button>
-      </form>
+            <div class="field">
+              <label for="lookback_years">Historical window</label>
+              <select id="lookback_years" name="lookback_years">
+                <option value="5">5 years</option>
+                <option value="8" selected>8 years</option>
+                <option value="10">10 years</option>
+                <option value="12">12 years</option>
+              </select>
+            </div>
 
-      <section>
-        <h2>Prediction Result</h2>
-        <pre id="output">Your prediction output will appear here.</pre>
+            <button type="submit" id="submit-btn">Run Prediction</button>
+          </form>
+        </section>
+
+        <section class="card">
+          <div class="result-header">
+            <h2>Result</h2>
+            <span id="status-badge" class="badge">Ready</span>
+          </div>
+          <div id="empty-state" class="panel muted">Run a prediction to see dashboard insights.</div>
+
+          <div id="casual-view" class="view hidden">
+            <div id="signal-badge" class="signal-badge neutral">NEUTRAL</div>
+            <div class="metric-row">
+              <div class="metric-label">Confidence</div>
+              <div class="progress-wrap">
+                <div id="confidence-bar" class="progress-bar"></div>
+              </div>
+              <span id="confidence-value" class="metric-value">0%</span>
+            </div>
+            <div id="action-line" class="action-line">Hold</div>
+            <p id="ai-explanation" class="panel"></p>
+          </div>
+
+          <div id="advanced-view" class="view hidden">
+            <div class="advanced-layout">
+              <div class="panel">
+                <h3>Price + EMA</h3>
+                <canvas id="candle-chart" height="220"></canvas>
+                <p id="ph-candle" class="panel-placeholder">Data will appear here after running a prediction.</p>
+              </div>
+              <div class="panel">
+                <h3>Volume</h3>
+                <canvas id="volume-chart" height="120"></canvas>
+                <p id="ph-volume" class="panel-placeholder">Data will appear here after running a prediction.</p>
+              </div>
+              <div class="panel">
+                <h3>Technical Indicators</h3>
+                <div id="technical-grid" class="technical-grid"></div>
+                <canvas id="macd-chart" height="120"></canvas>
+                <p id="ph-technical" class="panel-placeholder">Data will appear here after running a prediction.</p>
+              </div>
+              <div class="panel">
+                <h3>News Sentiment (Latest 5)</h3>
+                <div id="sentiment-feed"></div>
+                <p id="ph-news" class="panel-placeholder">Data will appear here after running a prediction.</p>
+              </div>
+              <div class="panel">
+                <h3>Backtest Summary</h3>
+                <div id="backtest-cards" class="cards-3"></div>
+                <p id="ph-backtest" class="panel-placeholder">Data will appear here after running a prediction.</p>
+              </div>
+              <div class="panel">
+                <h3>Risk Metrics</h3>
+                <div id="risk-cards" class="cards-3"></div>
+                <p id="ph-risk" class="panel-placeholder">Data will appear here after running a prediction.</p>
+              </div>
+              <div class="panel">
+                <h3>Multi-Timeframe Signals</h3>
+                <table class="signal-table">
+                  <thead>
+                    <tr><th>Horizon</th><th>Signal</th><th>Confidence</th></tr>
+                  </thead>
+                  <tbody id="timeframe-table"></tbody>
+                </table>
+                <p id="ph-timeframe" class="panel-placeholder">Data will appear here after running a prediction.</p>
+              </div>
+              <div id="earnings-banner" class="panel muted">
+                <p id="ph-earnings" class="panel-placeholder">Data will appear here after running a prediction.</p>
+              </div>
+            </div>
+          </div>
+
+          <p id="disclaimer" class="disclaimer"></p>
+        </section>
       </section>
     </main>
     <script src="/static/app.js"></script>
   </body>
-  </html>
+</html>

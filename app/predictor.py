@@ -1,188 +1,269 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 import numpy as np
 import pandas as pd
+import requests
+import ta
 import yfinance as yf
-from dotenv import load_dotenv
-from openai import OpenAI
-from sklearn import metrics
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.svm import SVC
-try:
-    from xgboost import XGBClassifier
-except Exception:  # noqa: BLE001
-    XGBClassifier = None
-
-load_dotenv()
+from sklearn.model_selection import train_test_split
+from xgboost import XGBClassifier
 
 
-class PredictionError(Exception):
-    """Raised when stock prediction fails in a user-facing way."""
+def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df
 
 
-@dataclass
-class ModelReport:
-    name: str
-    train_auc: float
-    valid_auc: float
+def _signal_and_confidence(probability: float) -> tuple[str, float]:
+    if probability >= 0.60:
+        signal = "BULLISH"
+    elif probability <= 0.40:
+        signal = "BEARISH"
+    else:
+        signal = "NEUTRAL"
+    confidence = float(abs(probability - 0.5) * 200)
+    return signal, confidence
 
 
-def _load_history(symbol: str, lookback_years: int) -> pd.DataFrame:
+def get_stock_data(ticker: str, years: int) -> pd.DataFrame:
+    period = f"{years}y"
     data = yf.download(
-        symbol,
-        period=f"{lookback_years}y",
+        ticker,
+        period=period,
         interval="1d",
         auto_adjust=False,
         progress=False,
     )
+    data = _normalize_columns(data)
     if data.empty:
-        raise PredictionError("No market data found for that ticker.")
-
-    if isinstance(data.columns, pd.MultiIndex):
-        data.columns = data.columns.get_level_values(0)
-
-    data = data.reset_index()
-    required = {"Date", "Open", "High", "Low", "Close", "Volume"}
-    if not required.issubset(set(data.columns)):
-        raise PredictionError("Downloaded data is missing required price columns.")
-    return data
+        raise ValueError(f"Could not fetch data for ticker: {ticker}")
+    keep = ["Open", "High", "Low", "Close", "Volume"]
+    if not set(keep).issubset(data.columns):
+        raise ValueError(f"Could not fetch data for ticker: {ticker}")
+    return data[keep].copy()
 
 
-def _build_features(df: pd.DataFrame) -> pd.DataFrame:
-    prepared = df.copy()
-    prepared["month"] = prepared["Date"].dt.month
-    prepared["is_quarter_end"] = np.where(prepared["month"] % 3 == 0, 1, 0)
-    prepared["open-close"] = prepared["Open"] - prepared["Close"]
-    prepared["low-high"] = prepared["Low"] - prepared["High"]
-    prepared["target"] = np.where(prepared["Close"].shift(-1) > prepared["Close"], 1, 0)
-    prepared = prepared.dropna().reset_index(drop=True)
-    return prepared
+def compute_features(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    out["rsi"] = ta.momentum.RSIIndicator(close=out["Close"], window=14).rsi()
+    macd = ta.trend.MACD(close=out["Close"])
+    out["macd"] = macd.macd()
+    out["macd_signal"] = macd.macd_signal()
+    out["macd_diff"] = macd.macd_diff()
+    out["ema20"] = ta.trend.EMAIndicator(close=out["Close"], window=20).ema_indicator()
+    out["ema50"] = ta.trend.EMAIndicator(close=out["Close"], window=50).ema_indicator()
+    bb = ta.volatility.BollingerBands(close=out["Close"], window=20, window_dev=2)
+    out["bb_upper"] = bb.bollinger_hband()
+    out["bb_lower"] = bb.bollinger_lband()
+    out["bb_pct"] = bb.bollinger_pband()
+    out["atr"] = ta.volatility.AverageTrueRange(
+        high=out["High"], low=out["Low"], close=out["Close"], window=14
+    ).average_true_range()
+    out["obv"] = ta.volume.OnBalanceVolumeIndicator(
+        close=out["Close"], volume=out["Volume"]
+    ).on_balance_volume()
+    out["week52_high_ratio"] = out["Close"] / out["Close"].rolling(252).max()
+    out["week52_low_ratio"] = out["Close"] / out["Close"].rolling(252).min()
+    out["momentum_5"] = out["Close"] - out["Close"].shift(5)
+    out["momentum_20"] = out["Close"] - out["Close"].shift(20)
+    out["volume_ratio"] = out["Volume"] / out["Volume"].rolling(20).mean()
+    out = out.dropna().copy()
+    return out
 
 
-def _train_models(features: np.ndarray, target: np.ndarray) -> tuple[list[ModelReport], Any]:
-    split_index = int(len(features) * 0.9)
-    if split_index < 50 or len(features) - split_index < 10:
-        raise PredictionError("Not enough data after preprocessing to train reliably.")
-
-    x_train, x_valid = features[:split_index], features[split_index:]
-    y_train, y_valid = target[:split_index], target[split_index:]
-
-    scaler = StandardScaler()
-    x_train_scaled = scaler.fit_transform(x_train)
-    x_valid_scaled = scaler.transform(x_valid)
-
-    models = [
-        ("LogisticRegression", LogisticRegression(max_iter=1200)),
-        ("SVC(poly)", SVC(kernel="poly", probability=True)),
+def train_and_predict(
+    df: pd.DataFrame,
+) -> tuple[str, float, float, XGBClassifier, pd.DataFrame, pd.Series, dict[str, float]]:
+    work = df.copy()
+    work["target"] = np.where(work["Close"].shift(-10) > work["Close"] * 1.02, 1, 0)
+    work = work.iloc[:-10].copy()
+    feature_cols = [
+        "rsi",
+        "macd",
+        "macd_signal",
+        "macd_diff",
+        "ema20",
+        "ema50",
+        "bb_pct",
+        "atr",
+        "obv",
+        "week52_high_ratio",
+        "week52_low_ratio",
+        "momentum_5",
+        "momentum_20",
+        "volume_ratio",
     ]
-    if XGBClassifier is not None:
-        models.append(
-            (
-                "XGBClassifier",
-                XGBClassifier(
-                    n_estimators=150,
-                    max_depth=3,
-                    learning_rate=0.05,
-                    subsample=0.9,
-                    colsample_bytree=0.9,
-                    eval_metric="logloss",
-                ),
-            )
+    x = work[feature_cols]
+    y = work["target"]
+    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, shuffle=False)
+
+    model = XGBClassifier(
+        n_estimators=200,
+        max_depth=4,
+        learning_rate=0.05,
+        use_label_encoder=False,
+        eval_metric="logloss",
+    )
+    model.fit(x_train, y_train)
+
+    x_last = x.iloc[[-1]]
+    probability = float(model.predict_proba(x_last)[0][1])
+    signal, confidence = _signal_and_confidence(probability)
+    features = {k: float(v) for k, v in x_last.iloc[0].to_dict().items()}
+    features["Close"] = float(work["Close"].iloc[-1])
+    return signal, confidence, probability, model, x_test, y_test, features
+
+
+def run_backtest(model: XGBClassifier, x_test: pd.DataFrame, y_test: pd.Series) -> tuple[float, float, float]:
+    probs = model.predict_proba(x_test)[:, 1]
+    signals = np.where(probs >= 0.60, 1, np.where(probs <= 0.40, -1, 0))
+    y = y_test.to_numpy()
+    non_neutral_mask = signals != 0
+
+    if np.sum(non_neutral_mask) == 0:
+        return 0.0, 0.0, 0.0
+
+    predicted_direction = (signals[non_neutral_mask] == 1).astype(int)
+    actual_direction = y[non_neutral_mask]
+    correct = predicted_direction == actual_direction
+    win_rate = float(correct.mean() * 100)
+
+    returns = np.where(correct, 0.01, -0.01).astype(float)
+    ret_std = float(np.std(returns))
+    sharpe = 0.0 if ret_std == 0 else float((np.mean(returns) / ret_std) * np.sqrt(252))
+    cumulative = np.cumprod(1 + returns)
+    running_max = np.maximum.accumulate(cumulative)
+    drawdown = (cumulative / running_max) - 1
+    max_drawdown = float(np.min(drawdown) * 100)
+    return win_rate, sharpe, max_drawdown
+
+
+def multi_timeframe_signals(df: pd.DataFrame, model: XGBClassifier) -> list[dict[str, Any]]:
+    feature_cols = [
+        "rsi",
+        "macd",
+        "macd_signal",
+        "macd_diff",
+        "ema20",
+        "ema50",
+        "bb_pct",
+        "atr",
+        "obv",
+        "week52_high_ratio",
+        "week52_low_ratio",
+        "momentum_5",
+        "momentum_20",
+        "volume_ratio",
+    ]
+    rows = [("Short (5d)", -5), ("Medium (20d)", -20), ("Long (60d)", -60)]
+    out: list[dict[str, Any]] = []
+    for horizon, idx in rows:
+        x_row = df.iloc[[idx]][feature_cols]
+        prob = float(model.predict_proba(x_row)[0][1])
+        signal, confidence = _signal_and_confidence(prob)
+        out.append({"horizon": horizon, "signal": signal, "confidence": round(confidence, 1)})
+    return out
+
+
+def compute_risk_metrics(df: pd.DataFrame) -> tuple[float, float, float]:
+    stock_ret = df["Close"].pct_change().dropna()
+    start = df.index.min().strftime("%Y-%m-%d")
+    end = df.index.max().strftime("%Y-%m-%d")
+    spy = yf.download("SPY", start=start, end=end, interval="1d", auto_adjust=False, progress=False)
+    spy = _normalize_columns(spy)
+    spy_ret = spy["Close"].pct_change().dropna() if not spy.empty else pd.Series(dtype=float)
+    aligned = pd.concat([stock_ret.tail(252), spy_ret.tail(252)], axis=1, join="inner").dropna()
+    beta = 0.0
+    if not aligned.empty:
+        beta = float(aligned.iloc[:, 0].cov(aligned.iloc[:, 1]) / (aligned.iloc[:, 1].var() + 1e-12))
+
+    volatility = float(stock_ret.tail(30).std() * np.sqrt(252) * 100)
+    var_95 = float(-1 * np.percentile(stock_ret.tail(252), 5) * 100)
+    return beta, volatility, var_95
+
+
+def get_llm_explanation(
+    ticker: str, signal: str, confidence: float, features: dict[str, float], mode: str
+) -> str:
+    rsi = float(features.get("rsi", 50.0))
+    macd_diff = float(features.get("macd_diff", 0.0))
+    close_value = float(features.get("Close", features.get("ema20", 0.0)))
+    ema50 = float(features.get("ema50", 0.0))
+
+    if rsi > 70:
+        rsi_interp = "overbought"
+    elif rsi < 30:
+        rsi_interp = "oversold"
+    else:
+        rsi_interp = "neutral"
+    macd_interp = "bullish momentum" if macd_diff > 0 else "bearish momentum"
+    ema_interp = "above" if close_value > ema50 else "below"
+
+    if mode == "advanced":
+        prompt = (
+            "You are a quantitative analyst explaining a stock signal to an experienced trader.\n"
+            f"Stock: {ticker}\n"
+            f"Signal: {signal} with {confidence:.0f}% confidence\n"
+            f"RSI: {rsi:.1f} ({rsi_interp})\n"
+            f"MACD histogram: {macd_diff:.3f} ({macd_interp})\n"
+            f"Price vs EMA50: {ema_interp}\n"
+            "Provide a 2-3 sentence technical analysis summary of why these indicators support this signal. "
+            "Use proper trading terminology. Do not give financial advice."
+        )
+    else:
+        prompt = (
+            "You are a friendly financial assistant explaining a stock prediction to a beginner investor.\n"
+            f"Stock: {ticker}\n"
+            f"Signal: {signal} with {confidence:.0f}% confidence\n"
+            f"Key indicators: RSI is {rsi:.1f} ({rsi_interp}), "
+            f"MACD histogram is {macd_diff:.3f} ({macd_interp}), "
+            f"price is {ema_interp} its 50-day average.\n"
+            "Write 2-3 sentences in plain English explaining why the model is giving this signal. "
+            "Avoid jargon. Do not give financial advice."
         )
 
-    reports: list[ModelReport] = []
-    fitted: list[tuple[float, Any]] = []
-    for name, model in models:
-        model.fit(x_train_scaled, y_train)
-        train_auc = metrics.roc_auc_score(y_train, model.predict_proba(x_train_scaled)[:, 1])
-        valid_auc = metrics.roc_auc_score(y_valid, model.predict_proba(x_valid_scaled)[:, 1])
-        reports.append(ModelReport(name=name, train_auc=float(train_auc), valid_auc=float(valid_auc)))
-        score = valid_auc - max(train_auc - valid_auc, 0) * 0.35
-        fitted.append((score, model))
-
-    selected_model = sorted(fitted, key=lambda item: item[0], reverse=True)[0][1]
-    return reports, (selected_model, scaler)
-
-
-def _build_ai_explanation(payload: dict[str, Any]) -> str:
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("TOGETHER_API_KEY", "")
     if not api_key:
-        return "AI explanation unavailable because OPENAI_API_KEY is not configured."
+        return "AI explanation unavailable. Signal is based on ML model output."
 
     try:
-        client = OpenAI(api_key=api_key)
-        prompt = (
-            "You are assisting a student mini-project about stock movement prediction. "
-            "Explain this prediction in 4 short bullet points and include one caution note. "
-            "Do not provide personalized financial advice.\n\n"
-            f"Data: {payload}"
+        response = requests.post(
+            "https://api.together.xyz/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "meta-llama/Llama-3-70b-chat-hf",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 200,
+                "temperature": 0.7,
+            },
+            timeout=30,
         )
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You explain ML stock predictions clearly."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.2,
-            max_tokens=280,
+        response.raise_for_status()
+        payload = response.json()
+        return (
+            payload.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "AI explanation unavailable. Signal is based on ML model output.")
+            .strip()
         )
-        content = (response.choices[0].message.content or "").strip()
-        return content or "AI explanation was empty."
-    except Exception as exc:  # noqa: BLE001
-        return f"AI explanation unavailable: {exc}"
+    except Exception:
+        return "AI explanation unavailable. Signal is based on ML model output."
 
 
-def predict_stock_movement(symbol: str, lookback_years: int = 8) -> dict[str, Any]:
-    clean_symbol = (symbol or "").strip().upper()
-    if not clean_symbol:
-        raise PredictionError("Ticker symbol is required.")
-    if not (2 <= lookback_years <= 15):
-        raise PredictionError("Lookback years must be between 2 and 15.")
-
-    raw = _load_history(clean_symbol, lookback_years)
-    prepared = _build_features(raw)
-    feature_columns = ["open-close", "low-high", "is_quarter_end"]
-    features = prepared[feature_columns].to_numpy()
-    target = prepared["target"].to_numpy()
-
-    reports, trained = _train_models(features, target)
-    model, scaler = trained
-    latest_features = scaler.transform(features[-1:].copy())
-    gain_probability = float(model.predict_proba(latest_features)[0][1])
-
-    if gain_probability >= 0.55:
-        recommendation = "Likely profit signal (upward move more probable)."
-    elif gain_probability <= 0.45:
-        recommendation = "Likely risk signal (downward move more probable)."
-    else:
-        recommendation = "Uncertain signal (edge is weak)."
-
-    result = {
-        "symbol": clean_symbol,
-        "lookback_years": lookback_years,
-        "latest_close": float(prepared.iloc[-1]["Close"]),
-        "prediction_for_next_trading_day": {
-            "gain_probability": round(gain_probability, 4),
-            "label": int(gain_probability >= 0.5),
-            "recommendation": recommendation,
-        },
-        "model_reports": [
-            {
-                "model": report.name,
-                "train_roc_auc": round(report.train_auc, 4),
-                "valid_roc_auc": round(report.valid_auc, 4),
-            }
-            for report in reports
-        ],
-    }
-    result["ai_explanation"] = _build_ai_explanation(result)
-    result["disclaimer"] = (
-        "This is an educational ML signal, not investment advice. "
-        "Use additional research before making decisions."
-    )
-    return result
+def check_earnings_warning(ticker: str) -> dict[str, Any]:
+    try:
+        cal = yf.Ticker(ticker).calendar
+        if not isinstance(cal, pd.DataFrame) or cal.empty:
+            return {"warning": False}
+        next_date = pd.to_datetime(cal.iloc[0, 0]).date()
+        days_away = (next_date - date.today()).days
+        if 0 <= days_away <= 28:
+            return {"warning": True, "date": next_date.isoformat(), "days_away": days_away}
+    except Exception:
+        return {"warning": False}
+    return {"warning": False}
